@@ -1,6 +1,7 @@
 import { connectToRelay } from './lib/relay-socket.js';
 import { randomBytes, bytesToHex } from './crypto/random.js';
 import { createHandshakeSession } from './crypto/three-pass.js';
+import { saveKey, getAllKeys } from './storage/key-store.js';
 
 function randomHexId() {
   return bytesToHex(randomBytes(32));
@@ -35,10 +36,15 @@ function getOrCreateSession(peerId, channel) {
       channel,
       send: (payload) => socket.emit('handshake', payload),
       onLog: (msg) => logLine(`[${peerId.slice(0, 8)}/${channel}] ${msg}`),
-      onComplete: ({ ownKey, peerKey }) => {
+      onComplete: async ({ ownKey, peerKey }) => {
         logLine(`[${peerId.slice(0, 8)}/${channel}] HANDSHAKE COMPLETE`);
         logLine(`  our key:  ${ownKey}`);
         logLine(`  their key: ${peerKey}`);
+
+        const createdAt = Date.now();
+        await saveKey({ channel, uidHash: myId, token: ownKey, createdAt });
+        await saveKey({ channel, uidHash: peerId, token: peerKey, createdAt });
+        logLine(`[${peerId.slice(0, 8)}/${channel}] stored both keys in IndexedDB`);
       },
     });
     sessions.set(key, session);
@@ -101,6 +107,18 @@ async function init() {
 
     const session = getOrCreateSession(peerId, channel);
     session.start();
+  });
+
+  document.getElementById('showStoredKeys').addEventListener('click', async () => {
+    const records = await getAllKeys();
+    if (records.length === 0) {
+      logLine('[no stored keys]');
+      return;
+    }
+    logLine(`[stored keys: ${records.length}]`);
+    for (const r of records) {
+      logLine(`  channel=${r.channel} user=${r.uidHash.slice(0, 8)} token=${r.token} createdAt=${new Date(r.createdAt).toISOString()}`);
+    }
   });
 }
 
