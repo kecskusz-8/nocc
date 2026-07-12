@@ -2,7 +2,7 @@
 // protocol over a plain WebSocket to talk to the relay. No socket.io-client
 // dependency, no ack/callback support (not needed by register/handshake).
 
-function connectToRelay(url) {
+export function connectToRelay(url) {
   const wsUrl = `${url.replace(/^http/, 'ws')}/socket.io/?EIO=4&transport=websocket`;
   const ws = new WebSocket(wsUrl);
 

@@ -1,6 +1,9 @@
+import { connectToRelay } from './lib/relay-socket.js';
+import { randomBytes, bytesToHex } from './crypto/random.js';
+import { createHandshakeSession } from './crypto/three-pass.js';
+
 function randomHexId() {
-  const bytes = crypto.getRandomValues(new Uint8Array(32));
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  return bytesToHex(randomBytes(32));
 }
 
 function logLine(text) {
@@ -16,10 +19,36 @@ function setStatus(text) {
 }
 
 let socket = null;
+let myId = null;
+
+// Sessions are keyed by "peerId:channel" so each (peer, channel) pair runs
+// its own independent handshake, per ARCHITECTURE.md's per-channel keys.
+const sessions = new Map();
+
+function getOrCreateSession(peerId, channel) {
+  const key = `${peerId}:${channel}`;
+  let session = sessions.get(key);
+  if (!session) {
+    session = createHandshakeSession({
+      myId,
+      peerId,
+      channel,
+      send: (payload) => socket.emit('handshake', payload),
+      onLog: (msg) => logLine(`[${peerId.slice(0, 8)}/${channel}] ${msg}`),
+      onComplete: ({ ownKey, peerKey }) => {
+        logLine(`[${peerId.slice(0, 8)}/${channel}] HANDSHAKE COMPLETE`);
+        logLine(`  our key:  ${ownKey}`);
+        logLine(`  their key: ${peerKey}`);
+      },
+    });
+    sessions.set(key, session);
+  }
+  return session;
+}
 
 async function init() {
   const stored = await chrome.storage.local.get(['myId', 'relayUrl']);
-  const myId = stored.myId || randomHexId();
+  myId = stored.myId || randomHexId();
   if (!stored.myId) await chrome.storage.local.set({ myId });
 
   document.getElementById('myId').value = myId;
@@ -34,6 +63,7 @@ async function init() {
     chrome.storage.local.set({ relayUrl });
 
     if (socket) socket.close();
+    sessions.clear();
 
     setStatus('Connecting...');
     socket = connectToRelay(relayUrl);
@@ -55,21 +85,22 @@ async function init() {
     });
 
     socket.on('handshake', (payload) => {
-      logLine(`from ${payload.sent_from}: ${JSON.stringify(payload.data)}`);
+      const session = getOrCreateSession(payload.sent_from, payload.channel);
+      session.handleIncoming(payload);
     });
   });
 
-  document.getElementById('send').addEventListener('click', () => {
+  document.getElementById('startHandshake').addEventListener('click', () => {
     if (!socket) {
       logLine('[not connected]');
       return;
     }
-    const to = document.getElementById('targetId').value.trim();
-    const data = document.getElementById('message').value;
-    if (!to || !data) return;
+    const peerId = document.getElementById('targetId').value.trim();
+    const channel = document.getElementById('channel').value.trim();
+    if (!peerId || !channel) return;
 
-    socket.emit('handshake', { to, data });
-    logLine(`to ${to}: ${JSON.stringify(data)}`);
+    const session = getOrCreateSession(peerId, channel);
+    session.start();
   });
 }
 

@@ -33,15 +33,14 @@
   <label>Target ID</label>
   <input id="targetId" placeholder="64-char hex id of the other mock client">
 
-  <label>Message</label>
+  <label>Channel</label>
   <div class="row">
-    <input id="message" placeholder="test message">
-    <button id="send">Send</button>
+    <input id="channel" value="general">
+    <button id="startHandshake">Start Handshake</button>
   </div>
 
   <div id="log"></div>
 
-  <script src="lib/relay-socket.js"></script>
-  <script src="popup.js"></script>
+  <script type="module" src="popup.js"></script>
 </body>
 </html>
