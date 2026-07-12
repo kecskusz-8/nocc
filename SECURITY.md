@@ -11,7 +11,7 @@ NOCC is designed against:
 - **Client-side/server-side scanning mandates (Chat Control):** if a scanner sits on Discord's servers, or is bolted onto the client by legal mandate, and inspects message content, NOCC ensures there's no plaintext content to inspect by the time it gets there. Only AES ciphertext.
 - **Passive network/server observation:** anyone reading Discord's database, logs, or network traffic sees ciphertext, not your conversation.
 - **Relay operator snooping:** the relay only ever handles encrypted blobs and salted/peppered UID hashes. A relay operator (including a malicious one) cannot recover message content or real user identities from what passes through it.
-- **Relay seizure:** the relay's database holds exactly one table: hashed UIDs and a first-seen timestamp. If it's seized, that's all there is to hand over. No message content, no keys, no message history, no record of who talked to whom.
+- **Relay seizure:** the relay's database holds exactly one table with one column: hashed UIDs. If it's seized, that's all there is to hand over. No message content, no keys, no message history, no timestamps, no record of who talked to whom.
 
 NOCC is **not** designed against, and does not claim to protect against:
 
@@ -27,6 +27,7 @@ NOCC is **not** designed against, and does not claim to protect against:
 - Message content, once both sides have completed the key exchange.
 - The K1/K2 key material exchanged during the handshake (masked under each user's own one-time pad before it ever touches the relay; the relay only ever sees XOR-masked blobs it has no way to unwrap).
 - Real Discord user IDs (the relay and database only ever see `SHA256(uid + SALT + PEPPER)`, never the raw ID).
+- Sender identity in a handshake pass. The relay tags every forwarded pass with `sent_from`, taken from which room the sending socket actually registered into, not from any value the client includes in the payload. A connected client can't claim to be relaying on behalf of a hash it never registered as.
 
 ## What is not protected
 
@@ -49,7 +50,7 @@ We'll acknowledge reports as promptly as a volunteer-run project can, and credit
 ## Known limitations
 
 - **Bounded, not perfect, forward secrecy.** Keys rotate every 3 days and are deleted entirely after 33 days, so a compromised key only exposes messages from within its own active window, not a conversation's full history. It is not per-message ratcheting: a key compromised while still active exposes everything encrypted under it during that window, and archived (non-active) keys sitting in IndexedDB for up to 33 days are themselves a real target if a device is compromised during that period.
-- **A persistent, if minimal, database.** The relay keeps a durable table of hashed UIDs that use the extension. This is intentionally the smallest thing that could work (no timestamps beyond first-seen, no connection history, no social graph), but it is a permanent record, and it's a thing to weigh if your threat model includes the relay's database being seized or subpoenaed. 
+- **A persistent, if minimal, database.** The relay keeps a durable table of hashed UIDs that use the extension. This is intentionally the smallest thing that could work (no timestamps, no connection history, no social graph), but it is a permanent record, and it's a thing to weigh if your threat model includes the relay's database being seized or subpoenaed.
 ##
 - No protection against a malicious or compromised relay operator observing connection metadata (timing, IP, who's connecting to whom). Only message content, key material, and the identity graph between hashes are protected from the relay.
 - Extension security depends on Discord's DOM structure not being adversarially manipulated by Discord itself; NOCC trusts the page it's injected into to the extent any content script must.

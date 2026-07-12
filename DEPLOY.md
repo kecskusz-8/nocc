@@ -16,10 +16,9 @@ Any $5/month VPS is overkill for the relay's actual resource needs. Steps are th
    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
    sudo apt-get install -y nodejs postgresql
    ```
-3. Create a database and the one table the relay needs:
+3. Create an empty database (just the database, Sequelize creates the table itself, no raw SQL needed):
    ```bash
    sudo -u postgres createdb nocc
-   sudo -u postgres psql nocc -c "CREATE TABLE known_users (uid_hash TEXT PRIMARY KEY, first_seen TIMESTAMPTZ NOT NULL DEFAULT now());"
    ```
 4. Clone the repo and install dependencies:
    ```bash
@@ -31,7 +30,8 @@ Any $5/month VPS is overkill for the relay's actual resource needs. Steps are th
    ```bash
    openssl rand -hex 32
    ```
-6. Run it. See [systemd](#systemd-service) below for keeping it running persistently, rather than just `node index.js` in a terminal you'll eventually close.
+6. Create `known_users` by running the ORM's sync once (`npm run db:sync`, see [`server/README.md`](server/README.md)), with `SALT` and `DATABASE_URL` set. The relay creates the same table automatically on every startup if it's missing, so this step is just a way to confirm the connection works before going further.
+7. Run it. See [systemd](#systemd-service) below for keeping it running persistently, rather than just `node index.js` in a terminal you'll eventually close.
 
 ## Docker deployment
 
@@ -55,46 +55,49 @@ services:
     build: ./server
     restart: unless-stopped
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     ports:
       - "3000:3000"
+    env_file:
+      - ./server/.env
     environment:
-      - PORT=3000
-      - SALT=${NOCC_SALT}
-      - PEPPER=${NOCC_PEPPER}
-      - DATABASE_URL=postgres://nocc:${NOCC_DB_PASSWORD}@db:5432/nocc
+      - DATABASE_URL=postgres://nocc:${DB_PASSWORD}@db:5432/nocc
 
   db:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
       - POSTGRES_USER=nocc
-      - POSTGRES_PASSWORD=${NOCC_DB_PASSWORD}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
       - POSTGRES_DB=nocc
     volumes:
       - nocc-db-data:/var/lib/postgresql/data
-      - ./server/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nocc"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 volumes:
   nocc-db-data:
 ```
 
-`server/init.sql` just needs the one table:
+`depends_on` waits for Postgres to pass its healthcheck, not just for the container to start, so the relay doesn't try to connect before the database is actually ready to accept connections.
 
-```sql
-CREATE TABLE known_users (
-  uid_hash   TEXT PRIMARY KEY,
-  first_seen TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-```
+No separate schema file needed, the relay creates `known_users` itself on startup through Sequelize (the same `sync()` call covered in [`ARCHITECTURE.md`](ARCHITECTURE.md#relay-server-internals)), so a fresh `db` volume just gets the table the first time `nocc-relay` boots against it.
+
+The relay container reuses `server/.env`, the same file you use for local development, via `env_file`, so `PORT`/`SALT`/`PEPPER` don't need to be duplicated anywhere. `DATABASE_URL` is the one exception: your local `.env` points at whatever Postgres you use for local dev (`localhost`), which isn't reachable from inside a container the same way, so the `environment:` line above deliberately overrides it to point at the `db` service instead. `environment:` values always win over anything loaded via `env_file:` for the same key.
+
+`server/.env` needs one more value beyond what local dev requires: `DB_PASSWORD`, used for the Postgres container's password (see `server/.env.example`). Generate it once with `openssl rand -hex 16` and leave it alone after that. Postgres only applies `POSTGRES_PASSWORD` the first time it initializes an empty data directory, so regenerating this on every run (rather than keeping a fixed value in `.env`) will lock the relay out of an existing database volume the second time you start the stack.
 
 Run it:
 
 ```bash
-NOCC_SALT=$(openssl rand -hex 32) NOCC_DB_PASSWORD=$(openssl rand -hex 16) docker compose up -d
+docker compose --env-file server/.env up -d --build
 ```
 
-Keep `NOCC_SALT`, `NOCC_PEPPER` (if used), and `NOCC_DB_PASSWORD` in a `.env` file that's **not** committed to git.
+`--env-file` is what lets Compose substitute `${DB_PASSWORD}` inside `docker-compose.yml` itself from `server/.env`, since that file lives in `server/` rather than next to `docker-compose.yml` at the repo root. Every other `docker compose` command against this project (`logs`, `ps`, `down`, ...) needs the same `--env-file server/.env` flag, or you'll get "variable not set" warnings, harmless for commands that only inspect already-running containers, but required for anything that (re)creates them.
 
 ## Systemd service
 
@@ -176,7 +179,7 @@ Point your extension's relay URL at `wss://relay.yourdomain.com`. Cloudflare ter
 
 There's no built-in monitoring or logging beyond whatever your process manager (systemd/Docker) captures by default: stdout, process start/stop, uncaught errors. This is intentional. The relay is designed to know as little as possible, and the database is designed to hold as little as possible: just a flat table of hashed UIDs, no per-connection log, no timing history.
 
-If you want operational visibility (uptime, connection counts) without compromising that principle, keep it aggregate and ephemeral. For example, an in-memory counter exposed on a `/health` endpoint, never anything tied to a specific `uid_hash` or written to disk. Don't bolt on request logging middleware that writes IPs or payloads to a log file, and don't add columns to `known_users` beyond `uid_hash` and `first_seen`. Both would defeat the purpose of the whole project.
+If you want operational visibility (uptime, connection counts) without compromising that principle, keep it aggregate and ephemeral. For example, an in-memory counter exposed on a `/health` endpoint, never anything tied to a specific `uid_hash` or written to disk. Don't bolt on request logging middleware that writes IPs or payloads to a log file, and don't add columns to `known_users` beyond `uid_hash`. Both would defeat the purpose of the whole project.
 
 ## Scaling considerations
 

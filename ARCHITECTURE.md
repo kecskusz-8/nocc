@@ -14,13 +14,13 @@ The relay only ever routes small encrypted handshake payloads between two hashed
 
 Before two users can exchange encrypted messages in a given channel, they need to trade keys, without ever relying on a pre-shared secret or a certificate authority. NOCC does this with **Shamir's three-pass protocol**: a way to move a secret from one party to another across an untrusted channel using only commutative encryption, where neither side needs to know anything about the other in advance beyond how to reach them (their hashed UID).
 
-Each key belongs to exactly one user in exactly one channel. It is never combined or derived into a separate shared secret. K1 encrypts only U1's messages in this channel; K2 encrypts only U2's messages in this channel. Delivering each key takes its own three-pass exchange, run twice, once per direction, six passes total per rotation. All six passes travel over a single opaque `handshake` event; the relay just forwards whatever payload arrives to the room matching its `to` field and never inspects the contents.
+Each key belongs to exactly one user in exactly one channel. It is never combined or derived into a separate shared secret. K1 encrypts only U1's messages in this channel; K2 encrypts only U2's messages in this channel. Delivering each key takes its own three-pass exchange, run twice, once per direction, six passes total per rotation. All six passes travel over a single opaque `handshake` event; the relay forwards whatever payload arrives to the room matching its `to` field and never inspects `data` or `pass`, but it does two things beyond blind forwarding: it drops the pass entirely if the sending socket never registered, and it stamps a `sent_from` field onto the outgoing payload with the sender's own registered hash, overwriting anything the client put there. The recipient needs to know which counterpart a given pass came from (they may have more than one exchange in flight at once), and that has to come from the relay's own record of who's connected as whom, not from a value the sender could just claim.
 
 **Deriving each user's pad**
 Before sending, each user derives a one-time encryption pad from their own hashed UID and the key they're about to send: `e1 = SHA256(uid_hash_U1 + K1)` for U1, `e2 = SHA256(uid_hash_U2 + K2)` for U2. Because K1 and K2 are freshly generated on every rotation, this pad is different every time, even between the same two users. Deriving it from the UID hash alone would mean reusing the same pad across every exchange that user ever makes, which is exactly the kind of one-time-pad reuse that breaks this style of encryption; tying it to the specific key being sent avoids that.
 
 **Delivering K1 (U1 to U2)**
-1. U1 encrypts K1 with their own pad, `E1(K1) = K1 XOR e1`, and sends `{ to: hash(U2_uid), channel, pass: 1, data: E1(K1) }` over `handshake`. The relay forwards it to whichever socket is in the room named `hash(U2_uid)`. If U2 isn't online, there's nothing to forward into; there's no queue or store-and-forward, U2 needs to be connected for a fresh attempt.
+1. U1 encrypts K1 with their own pad, `E1(K1) = K1 XOR e1`, and sends `{ to: hash(U2_uid), channel, pass: 1, data: E1(K1) }` over `handshake`. The relay forwards it to whichever socket is in the room named `hash(U2_uid)`, adding `sent_from: hash(U1_uid)` so U2 knows whose exchange this pass belongs to. If U2 isn't online, there's nothing to forward into; there's no queue or store-and-forward, U2 needs to be connected for a fresh attempt.
 2. U2 can't unwrap `E1(K1)` without `e1`, so instead layers their own pad on top: `E2(E1(K1))`, and sends it back to U1.
 3. U1 removes their own layer (XOR is self-inverse, so applying `e1` again cancels it): `E2(E1(K1)) XOR e1 = E2(K1)`, and sends that back to U2.
 4. U2 removes their own layer the same way, recovering `K1`.
@@ -70,7 +70,7 @@ Routing needs no separate bookkeeping. On `register`, the server does two things
 ```js
 socket.join(uid_hash);
 await db.query(
-  'INSERT INTO known_users (uid_hash, first_seen) VALUES ($1, now()) ON CONFLICT DO NOTHING',
+  'INSERT INTO known_users (uid_hash) VALUES ($1) ON CONFLICT DO NOTHING',
   [uid_hash]
 );
 ```
@@ -83,7 +83,7 @@ io.to(payload.to).emit(event, payload);
 
 Socket.io's own room membership does the work a manual `Map` used to do. When a socket disconnects, Socket.io removes it from its rooms automatically, no cleanup code required.
 
-The `known_users` table is the only thing that survives a restart. It has exactly two columns: `uid_hash` and `first_seen`. No per-connection logs, no last-seen timestamps, no record of who talked to whom. It answers exactly one question: has this hashed UID ever registered with this relay? Nothing else.
+The `known_users` table is the only thing that survives a restart. It has exactly one column: `uid_hash`. No per-connection logs, no timestamps, no record of who talked to whom. It answers exactly one question: has this hashed UID ever registered with this relay? Nothing else.
 
 ## Extension internals
 
@@ -95,7 +95,7 @@ The `known_users` table is the only thing that survives a restart. It has exactl
 ## Design decisions and tradeoffs
 
 - **DOM scraping instead of an official API/bot:** the tradeoff is fragility (Discord can break NOCC with any frontend change) in exchange for zero dependency on Discord's cooperation, approval, or awareness that NOCC exists. Given the adversarial premise of this project, bypassing surveillance mandates Discord may be legally forced to comply with, depending on Discord's blessing was never on the table.
-- **A minimal database instead of zero database:** early versions of this project aimed for a fully stateless relay. In practice, being able to tell whether a given hashed UID belongs to a NOCC user at all (for example, before attempting a handshake) needs *some* durable record. The compromise is a single table holding nothing but hashed UIDs and a first-seen timestamp: enough to answer "is this person using NOCC," nothing that reveals conversations, timing, or content. See [`SECURITY.md`](SECURITY.md) for what that tradeoff means if the database is ever seized.
+- **A minimal database instead of zero database:** early versions of this project aimed for a fully stateless relay. In practice, being able to tell whether a given hashed UID belongs to a NOCC user at all (for example, before attempting a handshake) needs *some* durable record. The compromise is a single table holding nothing but hashed UIDs: enough to answer "is this person using NOCC," nothing that reveals conversations, timing, or content. See [`SECURITY.md`](SECURITY.md) for what that tradeoff means if the database is ever seized.
 - **Per-sender, per-channel keys over one combined shared secret:** each user's messages in a channel are independently encrypted and independently readable. This avoids a single derived secret becoming a single point of compromise for both directions of a conversation, and it's what makes the 3-day/33-day rotation cycle meaningful. One side rotating out an old key doesn't require re-synchronizing a jointly derived value.
 - **A three-pass exchange over pre-shared secrets or PKI:** delivering each key with Shamir's three-pass protocol means neither side needs a pre-existing shared secret, a certificate, or any out-of-band setup beyond knowing the other person's hashed UID. It costs six passes per rotation instead of two, but keeps the "no config required" promise intact even for the cryptographic handshake itself.
 - **Room-based routing over an explicit map:** naming Socket.io rooms after `uid_hash` values removes an entire class of bookkeeping code (and the bugs that come with keeping a hand-rolled map in sync with actual socket lifecycles). Socket.io already guarantees room cleanup on disconnect.
