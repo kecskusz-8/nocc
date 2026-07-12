@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "NOCC (dev)",
+  "version": "0.0.1",
+  "description": "Dev scaffold: connects to the NOCC relay and exchanges mock messages. No Discord integration, no encryption yet.",
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "permissions": ["storage"],
+  "host_permissions": ["http://localhost:3000/*"]
+}

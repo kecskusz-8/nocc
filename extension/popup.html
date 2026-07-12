@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>NOCC (dev)</title>
+  <style>
+    body { font: 13px system-ui, sans-serif; width: 320px; padding: 10px; }
+    label { display: block; margin-top: 8px; font-size: 11px; color: #555; }
+    input { width: 100%; box-sizing: border-box; padding: 4px; font: 12px monospace; }
+    button { margin-top: 8px; padding: 4px 10px; }
+    #status { font-weight: bold; }
+    #log { margin-top: 10px; height: 160px; overflow-y: auto; border: 1px solid #ccc; padding: 4px; font: 11px monospace; background: #fafafa; }
+    #log div { margin-bottom: 4px; white-space: pre-wrap; word-break: break-all; }
+    .row { display: flex; gap: 6px; align-items: center; }
+    .row input { flex: 1; }
+  </style>
+</head>
+<body>
+  <label>Your ID</label>
+  <div class="row">
+    <input id="myId" readonly>
+    <button id="copyId">Copy</button>
+  </div>
+
+  <label>Relay URL</label>
+  <input id="relayUrl" value="http://localhost:3000">
+
+  <div class="row">
+    <button id="connect">Connect</button>
+    <span id="status">Disconnected</span>
+  </div>
+
+  <label>Target ID</label>
+  <input id="targetId" placeholder="64-char hex id of the other mock client">
+
+  <label>Message</label>
+  <div class="row">
+    <input id="message" placeholder="test message">
+    <button id="send">Send</button>
+  </div>
+
+  <div id="log"></div>
+
+  <script src="lib/relay-socket.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
