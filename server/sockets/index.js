@@ -3,30 +3,23 @@ const { isValidHash, registerUser, userExists } = require('../services/users');
 function attachSocketHandlers(io) {
   io.on('connection', (socket) => {
     socket.on('register', async ({ uid_hash } = {}) => {
-      if (!isValidHash(uid_hash)) {
-        console.log('[debug] register rejected, invalid hash:', uid_hash);
-        return;
+      if (!isValidHash(uid_hash)) return;
+
+      try {
+        socket.join(uid_hash);
+        await registerUser(uid_hash);
+        socket.data.uidHash = uid_hash;
+      } catch (err) {
+        socket.leave(uid_hash);
+        console.error('register failed:', err);
       }
-      socket.join(uid_hash);
-      await registerUser(uid_hash);
-      socket.data.uidHash = uid_hash;
-      console.log('[debug] registered + joined room:', uid_hash, 'socket', socket.id);
     });
 
     socket.on('handshake', (payload = {}) => {
       const sentFrom = socket.data.uidHash;
-      if (!sentFrom) {
-        console.log('[debug] handshake rejected, sender not registered. socket', socket.id);
-        return;
-      }
+      if (!sentFrom) return;
+      if (!isValidHash(payload.to)) return;
 
-      if (!isValidHash(payload.to)) {
-        console.log('[debug] handshake rejected, invalid "to":', payload.to);
-        return;
-      }
-
-      const room = io.sockets.adapter.rooms.get(payload.to);
-      console.log('[debug] handshake to', payload.to, '-> room has', room ? room.size : 0, 'member(s)');
       io.to(payload.to).emit('handshake', { ...payload, sent_from: sentFrom });
     });
 
@@ -37,7 +30,12 @@ function attachSocketHandlers(io) {
         return callback({ error: 'uid_hash must be a 64-character hex string' });
       }
 
-      callback({ exists: await userExists(uid_hash) });
+      try {
+        callback({ exists: await userExists(uid_hash) });
+      } catch (err) {
+        console.error('verify failed:', err);
+        callback({ error: 'internal error' });
+      }
     });
   });
 }
