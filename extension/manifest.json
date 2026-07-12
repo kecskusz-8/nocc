@@ -2,10 +2,16 @@
   "manifest_version": 3,
   "name": "NOCC (dev)",
   "version": "0.0.1",
-  "description": "Dev scaffold: connects to the NOCC relay and exchanges mock messages. No Discord integration, no encryption yet.",
+  "description": "Dev scaffold: connects to the NOCC relay, exchanges keys, and simulates chat. Reads the local user's own Discord ID; not yet wired into the rest of the pipeline.",
   "action": {
     "default_popup": "popup.html"
   },
   "permissions": ["storage"],
-  "host_permissions": ["http://localhost:3000/*"]
+  "host_permissions": ["http://localhost:3000/*", "https://discord.com/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://discord.com/*"],
+      "js": ["discord/get-user-id.js", "discord/content.js"]
+    }
+  ]
 }

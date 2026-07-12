@@ -1,11 +1,7 @@
 import { connectToRelay } from './lib/relay-socket.js';
-import { randomBytes, bytesToHex } from './crypto/random.js';
 import { createHandshakeSession } from './crypto/three-pass.js';
 import { saveKey, getAllKeys } from './storage/key-store.js';
-
-function randomHexId() {
-  return bytesToHex(randomBytes(32));
-}
+import { getMyId } from './discord/identity.js';
 
 function logLine(text) {
   const log = document.getElementById('log');
@@ -52,21 +48,35 @@ function getOrCreateSession(peerId, channel) {
   return session;
 }
 
-async function init() {
-  const stored = await chrome.storage.local.get(['myId', 'relayUrl']);
-  myId = stored.myId || randomHexId();
-  if (!stored.myId) await chrome.storage.local.set({ myId });
+async function refreshMyId() {
+  const salt = document.getElementById('salt').value;
+  const pepper = document.getElementById('pepper').value;
+  await chrome.storage.local.set({ salt, pepper });
 
+  const { id, source } = await getMyId();
+  myId = id;
   document.getElementById('myId').value = myId;
+  document.getElementById('idSource').textContent =
+    source === 'discord' ? '(hashed from your Discord ID)' : '(mock — no Discord ID found yet)';
+  return myId;
+}
+
+async function init() {
+  const stored = await chrome.storage.local.get(['salt', 'pepper', 'relayUrl']);
+  document.getElementById('salt').value = stored.salt || '';
+  document.getElementById('pepper').value = stored.pepper || '';
   document.getElementById('relayUrl').value = stored.relayUrl || 'http://localhost:3000';
+
+  await refreshMyId();
 
   document.getElementById('copyId').addEventListener('click', () => {
     navigator.clipboard.writeText(myId);
   });
 
-  document.getElementById('connect').addEventListener('click', () => {
+  document.getElementById('connect').addEventListener('click', async () => {
     const relayUrl = document.getElementById('relayUrl').value.trim();
     chrome.storage.local.set({ relayUrl });
+    await refreshMyId();
 
     if (socket) socket.close();
     sessions.clear();
