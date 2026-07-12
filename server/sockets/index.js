@@ -9,17 +9,25 @@ function attachSocketHandlers(io) {
       }
       socket.join(uid_hash);
       await registerUser(uid_hash);
+      socket.data.uidHash = uid_hash;
       console.log('[debug] registered + joined room:', uid_hash, 'socket', socket.id);
     });
 
     socket.on('handshake', (payload = {}) => {
+      const sentFrom = socket.data.uidHash;
+      if (!sentFrom) {
+        console.log('[debug] handshake rejected, sender not registered. socket', socket.id);
+        return;
+      }
+
       if (!isValidHash(payload.to)) {
         console.log('[debug] handshake rejected, invalid "to":', payload.to);
         return;
       }
+
       const room = io.sockets.adapter.rooms.get(payload.to);
       console.log('[debug] handshake to', payload.to, '-> room has', room ? room.size : 0, 'member(s)');
-      io.to(payload.to).emit('handshake', payload);
+      io.to(payload.to).emit('handshake', { ...payload, sent_from: sentFrom });
     });
 
     socket.on('verify', async ({ uid_hash } = {}, callback) => {

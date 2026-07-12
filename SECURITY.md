@@ -27,6 +27,7 @@ NOCC is **not** designed against, and does not claim to protect against:
 - Message content, once both sides have completed the key exchange.
 - The K1/K2 key material exchanged during the handshake (masked under each user's own one-time pad before it ever touches the relay; the relay only ever sees XOR-masked blobs it has no way to unwrap).
 - Real Discord user IDs (the relay and database only ever see `SHA256(uid + SALT + PEPPER)`, never the raw ID).
+- Sender identity in a handshake pass. The relay tags every forwarded pass with `sent_from`, taken from which room the sending socket actually registered into, not from any value the client includes in the payload. A connected client can't claim to be relaying on behalf of a hash it never registered as.
 
 ## What is not protected
 
