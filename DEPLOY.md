@@ -19,7 +19,7 @@ Any $5/month VPS is overkill for the relay's actual resource needs. Steps are th
 3. Create a database and the one table the relay needs:
    ```bash
    sudo -u postgres createdb nocc
-   sudo -u postgres psql nocc -c "CREATE TABLE known_users (uid_hash TEXT PRIMARY KEY, first_seen TIMESTAMPTZ NOT NULL DEFAULT now());"
+   sudo -u postgres psql nocc -c "CREATE TABLE known_users (uid_hash TEXT PRIMARY KEY);"
    ```
 4. Clone the repo and install dependencies:
    ```bash
@@ -83,8 +83,7 @@ volumes:
 
 ```sql
 CREATE TABLE known_users (
-  uid_hash   TEXT PRIMARY KEY,
-  first_seen TIMESTAMPTZ NOT NULL DEFAULT now()
+  uid_hash TEXT PRIMARY KEY
 );
 ```
 
@@ -176,7 +175,7 @@ Point your extension's relay URL at `wss://relay.yourdomain.com`. Cloudflare ter
 
 There's no built-in monitoring or logging beyond whatever your process manager (systemd/Docker) captures by default: stdout, process start/stop, uncaught errors. This is intentional. The relay is designed to know as little as possible, and the database is designed to hold as little as possible: just a flat table of hashed UIDs, no per-connection log, no timing history.
 
-If you want operational visibility (uptime, connection counts) without compromising that principle, keep it aggregate and ephemeral. For example, an in-memory counter exposed on a `/health` endpoint, never anything tied to a specific `uid_hash` or written to disk. Don't bolt on request logging middleware that writes IPs or payloads to a log file, and don't add columns to `known_users` beyond `uid_hash` and `first_seen`. Both would defeat the purpose of the whole project.
+If you want operational visibility (uptime, connection counts) without compromising that principle, keep it aggregate and ephemeral. For example, an in-memory counter exposed on a `/health` endpoint, never anything tied to a specific `uid_hash` or written to disk. Don't bolt on request logging middleware that writes IPs or payloads to a log file, and don't add columns to `known_users` beyond `uid_hash`. Both would defeat the purpose of the whole project.
 
 ## Scaling considerations
 

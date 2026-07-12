@@ -32,8 +32,7 @@ Create the one table the relay needs:
 
 ```sql
 CREATE TABLE known_users (
-  uid_hash   TEXT PRIMARY KEY,
-  first_seen TIMESTAMPTZ NOT NULL DEFAULT now()
+  uid_hash TEXT PRIMARY KEY
 );
 ```
 
@@ -81,7 +80,7 @@ Short version: it's one Node process plus a small Postgres database, so deploy i
 
 - **The relay operator can see:** connection timing, IP addresses (unless you put it behind something that hides them), and which hashed UIDs are connecting. That's metadata. This is unavoidable for any relay-based system and is documented in full in [`SECURITY.md`](../SECURITY.md).
 - **The relay operator cannot see:** message content, encryption keys, real Discord user IDs (only their salted/peppered hashes), or who is talking to whom, since the database doesn't record any relationship between two hashes, only their individual existence.
-- **If the database is seized or compromised:** the attacker gets a flat list of hashed UIDs and first-seen timestamps. No keys, no messages, no conversation graph. That list is only useful to someone who already knows a target's real UID plus your `SALT`/`PEPPER` to compute the matching hash and confirm they've used this relay.
+- **If the database is seized or compromised:** the attacker gets a flat list of hashed UIDs. No keys, no messages, no timestamps, no conversation graph. That list is only useful to someone who already knows a target's real UID plus your `SALT`/`PEPPER` to compute the matching hash and confirm they've used this relay.
 - **If a live connection is intercepted:** handshake payloads are already encrypted before they reach the relay, so interception without the recipient's decryption key yields nothing.
 - Run your own relay if you don't want to trust someone else's. That's the whole point of self-hosting being a first-class option here, not an afterthought.
 

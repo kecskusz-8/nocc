@@ -37,7 +37,7 @@ You need a machine that can run Node.js and stay reachable, plus a PostgreSQL in
 cd nocc/server
 npm install
 createdb nocc
-psql nocc -c "CREATE TABLE known_users (uid_hash TEXT PRIMARY KEY, first_seen TIMESTAMPTZ NOT NULL DEFAULT now());"
+psql nocc -c "CREATE TABLE known_users (uid_hash TEXT PRIMARY KEY);"
 SALT=$(openssl rand -hex 32) \
 DATABASE_URL=postgres://localhost:5432/nocc \
 node index.js
