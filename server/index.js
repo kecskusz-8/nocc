@@ -7,7 +7,7 @@ if (!process.env.SALT) {
 }
 
 const PORT = process.env.PORT || 3000;
-const io = new Server(PORT);
+const io = new Server(PORT, { cors: { origin: '*' } });
 
 attachSocketHandlers(io);
 
