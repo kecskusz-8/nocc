@@ -4,7 +4,8 @@
   "description": "Dumb WebSocket relay for NOCC. Forwards key-exchange payloads between hashed user IDs.",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node --env-file=.env index.js",
+    "db:sync": "node --env-file=.env database/sync-db.js"
   },
   "keywords": [],
   "author": "",
