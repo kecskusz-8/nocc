@@ -67,6 +67,7 @@ The relay speaks Socket.io, and deliberately has almost no API surface. Every pa
 | Event | Direction | Payload | Purpose |
 |---|---|---|---|
 | `register` | client → server | `{ uid_hash }` | Joins the socket to a room named `uid_hash`, and upserts `uid_hash` into `known_users` |
+| `verify` | client → server (ack) | `{ uid_hash }` → `{ exists }` | Checks whether a hashed UID belongs to a registered NOCC user, via a Socket.io acknowledgement callback rather than a broadcast event |
 | `handshake` | client → server → client | `{ to: uid_hash, channel, pass: 1-3, data: <masked blob> }` | One pass of a three-pass key exchange. Used six times per rotation (three passes to deliver K1, three to deliver K2). Entirely opaque to the server. |
 | `disconnect` | client → server | none | Socket.io removes the socket from its rooms automatically; no server code required |
 

@@ -1,4 +1,4 @@
-const { isValidHash, registerUser } = require('../services/users');
+const { isValidHash, registerUser, userExists } = require('../services/users');
 
 function attachSocketHandlers(io) {
   io.on('connection', (socket) => {
@@ -20,6 +20,16 @@ function attachSocketHandlers(io) {
       const room = io.sockets.adapter.rooms.get(payload.to);
       console.log('[debug] handshake to', payload.to, '-> room has', room ? room.size : 0, 'member(s)');
       io.to(payload.to).emit('handshake', payload);
+    });
+
+    socket.on('verify', async ({ uid_hash } = {}, callback) => {
+      if (typeof callback !== 'function') return;
+
+      if (!isValidHash(uid_hash)) {
+        return callback({ error: 'uid_hash must be a 64-character hex string' });
+      }
+
+      callback({ exists: await userExists(uid_hash) });
     });
   });
 }
