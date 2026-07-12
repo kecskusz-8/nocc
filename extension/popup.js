@@ -76,7 +76,6 @@ async function init() {
   document.getElementById('connect').addEventListener('click', async () => {
     const relayUrl = document.getElementById('relayUrl').value.trim();
     chrome.storage.local.set({ relayUrl });
-    await refreshMyId();
 
     if (socket) socket.close();
     sessions.clear();
@@ -84,7 +83,14 @@ async function init() {
     setStatus('Connecting...');
     socket = connectToRelay(relayUrl);
 
-    socket.on('connect', () => {
+    socket.on('connect', async () => {
+      setStatus('Fetching config...');
+      const config = await socket.emitWithAck('config', {});
+      document.getElementById('salt').value = config.salt || '';
+      document.getElementById('pepper').value = config.pepper || '';
+      logLine(`[fetched config from relay: salt=${config.salt ? 'set' : 'empty'}, pepper=${config.pepper ? 'set' : 'empty'}]`);
+      await refreshMyId();
+
       setStatus('Connected');
       socket.emit('register', { uid_hash: myId });
       logLine(`[connected, registered as ${myId}]`);

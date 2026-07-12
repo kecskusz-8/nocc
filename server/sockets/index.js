@@ -23,6 +23,15 @@ function attachSocketHandlers(io) {
       io.to(payload.to).emit('handshake', { ...payload, sent_from: sentFrom });
     });
 
+    // Hands SALT/PEPPER to any connecting client, no registration required
+    // (a client needs these to compute its own uid_hash before it can even
+    // register). Deliberate deviation from treating SALT/PEPPER as strictly
+    // out-of-band secrets, per the operator's own choice for this relay.
+    socket.on('config', (_payload, callback) => {
+      if (typeof callback !== 'function') return;
+      callback({ salt: process.env.SALT, pepper: process.env.PEPPER || null });
+    });
+
     socket.on('verify', async ({ uid_hash } = {}, callback) => {
       if (typeof callback !== 'function') return;
 
