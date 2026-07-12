@@ -37,11 +37,12 @@ You need a machine that can run Node.js and stay reachable, plus a PostgreSQL in
 cd nocc/server
 npm install
 createdb nocc
-psql nocc -c "CREATE TABLE known_users (uid_hash TEXT PRIMARY KEY);"
 SALT=$(openssl rand -hex 32) \
 DATABASE_URL=postgres://localhost:5432/nocc \
 node index.js
 ```
+
+No manual table creation needed, the relay creates `known_users` itself through the ORM the first time it connects.
 
 Note the `SALT` value you generated. You'll need to give it to everyone using this relay. Save it somewhere; it's not shown again automatically.
 

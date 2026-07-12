@@ -16,7 +16,7 @@ It does two things: forward encrypted handshake payloads between two hashed user
 
 - No message relaying. Chat messages never touch the relay; they travel through Discord's own infrastructure as ciphertext, decrypted client-side on arrival.
 - No key storage. K1/K2 pass through in transit, masked under each user's own one-time pad, and are never written anywhere server-side.
-- No connection logs, no last-seen timestamps, no record of who talked to whom. The database holds exactly one thing: `uid_hash` and when it was first seen.
+- No connection logs, no timestamps, no record of who talked to whom. The database holds exactly one thing: `uid_hash`.
 - No authentication beyond "you know your own hashed UID." This is intentionally minimal. See [`SECURITY.md`](../SECURITY.md) for the threat model this is and isn't designed for.
 
 ## Installation
@@ -28,13 +28,7 @@ cd server
 npm install
 ```
 
-Create the one table the relay needs:
-
-```sql
-CREATE TABLE known_users (
-  uid_hash TEXT PRIMARY KEY
-);
-```
+No manual table setup, the ORM creates `known_users` itself the first time the relay connects (or run `npm run db:sync` to do just that step on its own, see below).
 
 ## Running it
 
