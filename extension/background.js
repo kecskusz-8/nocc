@@ -5,7 +5,7 @@
 import { connectToRelay } from './lib/relay-socket.js';
 import { createHandshakeSession } from './crypto/three-pass.js';
 import { saveKey, getKeysFor, getAllKeys } from './storage/key-store.js';
-import { getMyId } from './discord/identity.js';
+import { getMyId } from './identity.js';
 
 let socket = null;
 let myUidHash = null;
@@ -168,8 +168,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
 // Keep the service worker alive while any Discord tab has the extension
 // connected — prevents the relay socket from being killed mid-handshake.
-chrome.runtime.onConnect.addListener((_port) => {
-  // Holding a reference to the port keeps the SW alive until the tab closes.
+chrome.runtime.onConnect.addListener((port) => {
+  port.onDisconnect.addListener(() => {
+    // Reading lastError suppresses the "Unchecked runtime.lastError" warning
+    // that fires when the port closes because the page entered bfcache.
+    void chrome.runtime.lastError;
+  });
 });
 
 // Auto-connect on startup.

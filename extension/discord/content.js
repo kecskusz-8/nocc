@@ -210,11 +210,21 @@ function setupMessageDecryptor() {
 
   let lastPath = '';
   let scheduledScan = false;
+  let pendingScan = false;
 
   function scheduleScan(delayMs) {
     if (scheduledScan) return;
     scheduledScan = true;
     setTimeout(() => { scheduledScan = false; scan(); }, delayMs);
+  }
+
+  // Debounced entry point for the MutationObserver so that bursts of DOM
+  // mutations during Discord's React renders only trigger one scan per frame
+  // instead of one per mutation (which would be hundreds per second).
+  function queueScan() {
+    if (pendingScan) return;
+    pendingScan = true;
+    setTimeout(() => { pendingScan = false; scan(); }, 50);
   }
 
   async function tryDecrypt(el, channelId) {
@@ -294,7 +304,9 @@ function setupMessageDecryptor() {
       // Wait a tick for Discord to render the new channel DOM before injecting.
       setTimeout(() => injectNoccUi(channelId), 300);
     } else if (!document.getElementById('nocc-toggle') || !document.getElementById('nocc-peer-icon')) {
-      // Re-inject if React reconciliation removed our elements.
+      // Re-inject if React removed our elements. Safe here because queueScan's
+      // 50ms debounce means our DOM mutations don't re-enter scan() immediately —
+      // the next queued scan will see the elements present and stop.
       injectNoccUi(channelId);
     }
 
@@ -303,7 +315,7 @@ function setupMessageDecryptor() {
     });
   }
 
-  new MutationObserver(scan).observe(document.body, { childList: true, subtree: true });
+  new MutationObserver(queueScan).observe(document.body, { childList: true, subtree: true });
   scan();
 }
 
@@ -314,14 +326,25 @@ function setupMessageDecryptor() {
 
   if (id) {
     console.log('[nocc] discord id:', id);
-    chrome.storage.local.set({ discordUserId: id });
+    chrome.storage.local.set({ platformUserId: id });
   } else {
     console.warn('[nocc] could not find a Discord user id (user_id_cache missing/unexpected shape)');
   }
 
   // Keep the background service worker alive while this tab is open so the
   // relay socket stays connected during multi-pass handshakes.
-  chrome.runtime.connect({ name: 'nocc-keepalive' });
+  // Re-connect on bfcache restore (pageshow persisted) since all ports are
+  // closed when a page enters the back/forward cache.
+  function connectKeepalive() {
+    const port = chrome.runtime.connect({ name: 'nocc-keepalive' });
+    port.onDisconnect.addListener(() => {
+      // Reading lastError suppresses the "Unchecked runtime.lastError" warning
+      // that Brave/Chrome emits when the port closes due to bfcache entry.
+      void chrome.runtime.lastError;
+    });
+  }
+  connectKeepalive();
+  window.addEventListener('pageshow', (e) => { if (e.persisted) connectKeepalive(); });
 
   // Resolve our own uid hash so tryDecrypt can skip our own messages.
   getMyUidHash().then((h) => { myOwnUidHash = h; });

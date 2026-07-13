@@ -1,5 +1,5 @@
 import { getAllKeys } from './storage/key-store.js';
-import { getMyId } from './discord/identity.js';
+import { getMyId } from './identity.js';
 
 function logLine(text) {
   const log = document.getElementById('log');
@@ -16,7 +16,7 @@ async function refreshMyId() {
   myId = id;
   document.getElementById('myId').value = myId;
   document.getElementById('idSource').textContent =
-    source === 'discord' ? '(hashed from your Discord ID)' : '(mock — no Discord ID found yet)';
+    source === 'platform' ? '(hashed from your Discord ID)' : '(mock — no Discord ID found yet)';
 }
 
 async function refreshStatus() {
