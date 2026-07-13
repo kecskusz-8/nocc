@@ -11,6 +11,12 @@
   "content_scripts": [
     {
       "matches": ["https://discord.com/*"],
+      "js": ["discord/page-inject.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://discord.com/*"],
       "js": ["discord/get-user-id.js", "discord/content.js"]
     }
   ]
