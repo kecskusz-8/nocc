@@ -15,20 +15,37 @@ let reconnectTimer = null;
 
 // --- session management (mirrors popup.js) ---
 
-function getOrCreateSession(peerId, channel) {
+async function getOrCreateSession(peerId, channel) {
   const key = `${peerId}:${channel}`;
   if (sessions.has(key)) return sessions.get(key);
+
+  // On the very first handshake with this peer (no peer key stored yet), reuse
+  // the own-channel key that was already created to encrypt our first message.
+  // The 3-pass exchange will deliver that key to the peer so they can decrypt
+  // even that first message retroactively. On key rotation (peer key exists),
+  // fall through to randomBytes so we get fresh key material.
+  let providedOwnKey = null;
+  const peerKeys = await getKeysFor(channel, peerId);
+  if (peerKeys.length === 0) {
+    const ownKeys = await getKeysFor(channel, myUidHash);
+    providedOwnKey = ownKeys[0]?.token ?? null;
+  }
 
   const session = createHandshakeSession({
     myId: myUidHash,
     peerId,
     channel,
+    providedOwnKey,
     send: (payload) => socket.emit('handshake', payload),
     onLog: (msg) => console.log(`[nocc handshake ${peerId.slice(0, 8)}/${channel}]`, msg),
     onComplete: async ({ ownKey, peerKey }) => {
       console.log('[nocc] handshake complete with', peerId.slice(0, 8), 'in channel', channel);
       const createdAt = Date.now();
-      await saveKey({ channel, uidHash: myUidHash, token: ownKey, createdAt });
+      // Skip re-saving our own key when we used the pre-existing one — it's
+      // already in the DB and saving again would create a harmless duplicate.
+      if (!providedOwnKey) {
+        await saveKey({ channel, uidHash: myUidHash, token: ownKey, createdAt });
+      }
       await saveKey({ channel, uidHash: peerId, token: peerKey, createdAt });
     },
   });
@@ -69,9 +86,9 @@ function connect(onRegistered) {
       resolve();
     });
 
-    socket.on('handshake', (payload) => {
+    socket.on('handshake', async (payload) => {
       if (!myUidHash) return;
-      const session = getOrCreateSession(payload.sent_from, payload.channel);
+      const session = await getOrCreateSession(payload.sent_from, payload.channel);
       session.handleIncoming(payload);
     });
 
@@ -158,7 +175,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       const existing = await getKeysFor(msg.channel, msg.peerId);
       if (existing.length > 0) { sendResponse({ ok: true }); return; }
 
-      const session = getOrCreateSession(msg.peerId, msg.channel);
+      const session = await getOrCreateSession(msg.peerId, msg.channel);
       session.start(); // no-ops if session already in progress (guarded in three-pass.js)
       sendResponse({ ok: true });
     })();

@@ -17,8 +17,8 @@
 
 import { randomBytes, hexToBytes, bytesToHex, xorBytes, sha256, concatBytes } from './random.js';
 
-export function createHandshakeSession({ myId, peerId, channel, send, onLog = () => {}, onComplete = () => {} }) {
-  const ownKey = randomBytes(32);
+export function createHandshakeSession({ myId, peerId, channel, send, onLog = () => {}, onComplete = () => {}, providedOwnKey = null }) {
+  const ownKey = providedOwnKey ? hexToBytes(providedOwnKey) : randomBytes(32);
   const ready = sha256(concatBytes(hexToBytes(myId), ownKey));
 
   let ownPad = null;
