@@ -4,16 +4,124 @@
   <meta charset="utf-8">
   <title>NOCC (dev)</title>
   <style>
-    body { font: 13px system-ui, sans-serif; width: 320px; padding: 10px; }
-    label { display: block; margin-top: 8px; font-size: 11px; color: #555; }
-    input { width: 100%; box-sizing: border-box; padding: 4px; font: 12px monospace; }
-    button { margin-top: 8px; padding: 4px 10px; }
-    #status { font-weight: bold; }
-    #idSource { display: block; font-size: 10px; color: #777; margin-top: 2px; }
-    #log { margin-top: 10px; height: 160px; overflow-y: auto; border: 1px solid #ccc; padding: 4px; font: 11px monospace; background: #fafafa; }
-    #log div { margin-bottom: 4px; white-space: pre-wrap; word-break: break-all; }
-    .row { display: flex; gap: 6px; align-items: center; }
-    .row input { flex: 1; }
+    :root {
+      --bg: #18181b;
+      --surface: #27272a;
+      --border: #3f3f46;
+      --text: #e4e4e7;
+      --muted: #71717a;
+      --accent: #7c3aed;
+      --accent-hover: #6d28d9;
+      --green: #22c55e;
+      --red: #ef4444;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      font: 13px system-ui, sans-serif;
+      width: 320px;
+      padding: 12px;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+    }
+
+    label {
+      display: block;
+      margin-top: 10px;
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    input {
+      width: 100%;
+      padding: 6px 8px;
+      margin-top: 3px;
+      font: 12px monospace;
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      outline: none;
+    }
+
+    input:focus { border-color: var(--accent); }
+    input[readonly] { color: var(--muted); }
+
+    button {
+      padding: 6px 12px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    button:hover { background: var(--accent-hover); }
+
+    #idSource {
+      display: block;
+      font-size: 10px;
+      color: var(--muted);
+      margin-top: 3px;
+    }
+
+    .row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      margin-top: 3px;
+    }
+
+    .row input { flex: 1; margin-top: 0; }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-top: 12px;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--red);
+      flex-shrink: 0;
+      transition: background 0.3s;
+    }
+
+    .status-dot.connected { background: var(--green); }
+
+    .status-text {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    #log {
+      margin-top: 10px;
+      height: 140px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 6px 8px;
+      font: 11px monospace;
+      background: var(--surface);
+      color: var(--text);
+    }
+
+    #log div {
+      margin-bottom: 3px;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    #showStoredKeys { margin-top: 12px; }
   </style>
 </head>
 <body>
@@ -24,27 +132,12 @@
   </div>
   <span id="idSource"></span>
 
-  <label>Salt (auto-fetched from relay on connect)</label>
-  <input id="salt" placeholder="fetched automatically once connected">
-
-  <label>Pepper (auto-fetched, optional)</label>
-  <input id="pepper" placeholder="fetched automatically once connected">
-
   <label>Relay URL</label>
   <input id="relayUrl" value="http://localhost:3000">
 
-  <div class="row">
-    <button id="connect">Connect</button>
-    <span id="status">Disconnected</span>
-  </div>
-
-  <label>Target ID</label>
-  <input id="targetId" placeholder="64-char hex id of the other mock client">
-
-  <label>Channel</label>
-  <div class="row">
-    <input id="channel" value="general">
-    <button id="startHandshake">Start Handshake</button>
+  <div class="status-row">
+    <div class="status-dot" id="statusDot"></div>
+    <span class="status-text" id="statusText">Disconnected</span>
   </div>
 
   <button id="showStoredKeys">Show Stored Keys</button>

@@ -101,6 +101,11 @@ async function ensureConnected() {
 // JS context (discord.com origin) and cannot access the extension's IndexedDB.
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg.type === 'nocc-status') {
+    sendResponse({ connected: !!(socket && myUidHash) });
+    return;
+  }
+
   if (msg.type === 'nocc-wake') {
     ensureConnected();
     sendResponse({ ok: true });
