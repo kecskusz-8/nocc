@@ -48,11 +48,15 @@
     return m ? m[1] : null;
   }
 
+  function isEncryptEnabled() {
+    return document.getElementById('nocc-state')?.dataset?.encrypt !== '0';
+  }
+
   // --- fetch ---
   const originalFetch = window.fetch.bind(window);
   window.fetch = async function (input, init) {
     const url = typeof input === 'string' ? input : input?.url;
-    if (init && isMessagePost(init.method, url) && init.body) {
+    if (init && isMessagePost(init.method, url) && init.body && isEncryptEnabled()) {
       try {
         const body = JSON.parse(init.body);
         if (typeof body.content === 'string' && body.content.length > 0) {
@@ -76,7 +80,7 @@
 
   XMLHttpRequest.prototype.send = function (body) {
     const xhr = this;
-    if (isMessagePost(xhr._noccMethod, xhr._noccUrl) && body) {
+    if (isMessagePost(xhr._noccMethod, xhr._noccUrl) && body && isEncryptEnabled()) {
       try {
         const parsed = JSON.parse(body);
         if (typeof parsed.content === 'string' && parsed.content.length > 0) {

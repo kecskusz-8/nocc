@@ -29,16 +29,19 @@ function xorStream(msgBytes, keyBytes) {
 
 // --- key helpers (delegated to background service worker) ---
 
-// Read-only lookup — returns token hex or null.
 async function getKey(channelId, uidHash) {
   const resp = await chrome.runtime.sendMessage({ type: 'nocc-get-key', channel: channelId, uidHash });
   return resp?.token ?? null;
 }
 
-// Returns own key for (channelId, uidHash), creating one if absent.
 async function getOrCreateOwnChannelKey(channelId, uidHash) {
   const resp = await chrome.runtime.sendMessage({ type: 'nocc-get-or-create-key', channel: channelId, uidHash });
   return resp?.token ?? null;
+}
+
+async function verifyPeer(uidHash) {
+  const resp = await chrome.runtime.sendMessage({ type: 'nocc-verify-peer', uidHash }).catch(() => null);
+  return resp?.exists === true;
 }
 
 function getCurrentChannelId() {
@@ -46,8 +49,6 @@ function getCurrentChannelId() {
   return parts[parts.length - 1] || null;
 }
 
-// Returns the SHA256 UID hash written by background.js after relay connect.
-// Wakes the background if needed and waits up to 3 s.
 async function getMyUidHash() {
   let { myUidHash } = await chrome.storage.local.get('myUidHash');
   if (myUidHash) return myUidHash;
@@ -61,8 +62,121 @@ async function getMyUidHash() {
   return null;
 }
 
+// --- toggle state bridge ---
+// A hidden element lets page-inject.js (MAIN world) read the toggle state
+// without requiring any message passing at send time.
+
+function injectNoccState() {
+  if (document.getElementById('nocc-state')) return;
+  const el = document.createElement('div');
+  el.id = 'nocc-state';
+  el.dataset.encrypt = '1';
+  el.style.display = 'none';
+  document.documentElement.appendChild(el);
+}
+
+// --- NOCC peer cache ---
+// channelId → Set<senderUidHash> for confirmed NOCC senders seen this session.
+const channelNoccPeers = new Map();
+
+// Own uid hash — populated at startup to filter our own messages from tryDecrypt.
+let myOwnUidHash = null;
+
+// --- UI injection ---
+
+function updateNoccIcon(channelId) {
+  const icon = document.getElementById('nocc-peer-icon');
+  if (!icon) return;
+  const active = (channelNoccPeers.get(channelId)?.size ?? 0) > 0;
+  icon.style.color = active ? '#22c55e' : '#ef4444';
+  icon.title = active ? 'NOCC peer active' : 'No NOCC peer detected';
+}
+
+function injectNoccUi(channelId) {
+  try {
+    // --- lock toggle ---
+    const existingToggle = document.getElementById('nocc-toggle');
+    if (existingToggle) existingToggle.remove();
+
+    const stateEl = document.getElementById('nocc-state');
+    const encryptOn = stateEl ? stateEl.dataset.encrypt !== '0' : true;
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.id = 'nocc-toggle';
+    toggleBtn.textContent = encryptOn ? '🔒' : '🔓';
+    toggleBtn.title = encryptOn ? 'NOCC encryption on' : 'NOCC encryption off';
+    Object.assign(toggleBtn.style, {
+      background: 'transparent',
+      border: 'none',
+      cursor: 'pointer',
+      fontSize: '18px',
+      padding: '0 4px',
+      opacity: encryptOn ? '1' : '0.45',
+      lineHeight: '1',
+      display: 'flex',
+      alignItems: 'center',
+    });
+
+    toggleBtn.addEventListener('click', () => {
+      const state = document.getElementById('nocc-state');
+      if (!state) return;
+      const nowOn = state.dataset.encrypt !== '1';
+      state.dataset.encrypt = nowOn ? '1' : '0';
+      toggleBtn.textContent = nowOn ? '🔒' : '🔓';
+      toggleBtn.title = nowOn ? 'NOCC encryption on' : 'NOCC encryption off';
+      toggleBtn.style.opacity = nowOn ? '1' : '0.45';
+    });
+
+    // Try to insert into the toolbar button row (emoji/gif icons area).
+    const toolbar = document.querySelector('[class*="toolbar"]');
+    if (toolbar) {
+      toolbar.insertBefore(toggleBtn, toolbar.firstChild);
+    } else {
+      // Fallback: append to the bottom form area.
+      const form = document.querySelector('form[class*="form"]');
+      if (form) form.appendChild(toggleBtn);
+    }
+  } catch (_) {}
+
+  try {
+    // --- peer status icon ---
+    const existingIcon = document.getElementById('nocc-peer-icon');
+    if (existingIcon) existingIcon.remove();
+
+    const dot = document.createElement('span');
+    dot.id = 'nocc-peer-icon';
+    dot.textContent = 'NOCC';
+    Object.assign(dot.style, {
+      fontSize: '11px',
+      fontWeight: '700',
+      letterSpacing: '0.06em',
+      marginLeft: '8px',
+      color: '#ef4444',
+      transition: 'color 0.3s',
+      userSelect: 'none',
+      flexShrink: '0',
+    });
+    dot.title = 'No NOCC peer detected';
+
+    // Target the channel header via its stable aria-label.
+    const topBar = document.querySelector('[aria-label="Channel header"]');
+    const titleEl = topBar && (
+      topBar.querySelector('[class*="titleWrapper"]') ||
+      topBar.querySelector('h1') ||
+      topBar.querySelector('h2')
+    );
+
+    if (titleEl) {
+      titleEl.appendChild(dot);
+    } else if (topBar) {
+      topBar.appendChild(dot);
+    }
+
+    updateNoccIcon(channelId);
+  } catch (_) {}
+}
+
 // --- encryption request handler ---
-// Format: nocc_{senderUidHash}_{hexCiphertext}
 function listenForEncryptRequests() {
   window.addEventListener('message', async (event) => {
     if (event.source !== window) return;
@@ -89,14 +203,14 @@ function listenForEncryptRequests() {
 }
 
 // --- message decryptor ---
-// Watches the DOM for nocc_{64hexSenderUid}_{hexCipher} messages.
-// If the sender's key is not on file, triggers a handshake and retries.
 function setupMessageDecryptor() {
   const dec = new TextDecoder();
   const processing = new WeakSet();
   const pendingHandshake = new Set();
 
+  let lastPath = '';
   let scheduledScan = false;
+
   function scheduleScan(delayMs) {
     if (scheduledScan) return;
     scheduledScan = true;
@@ -114,12 +228,29 @@ function setupMessageDecryptor() {
       const [, senderUidHash, cipherHex] = match;
       if (cipherHex.length % 2 !== 0) return;
 
+      const isOwnMessage = myOwnUidHash && senderUidHash === myOwnUidHash;
+
       const tokenHex = await getKey(channelId, senderUidHash);
 
       if (!tokenHex) {
+        // Own messages with no key: nothing to decrypt or handshake about.
+        if (isOwnMessage) return;
+
         const hsKey = `${channelId}:${senderUidHash}`;
         if (!pendingHandshake.has(hsKey)) {
           pendingHandshake.add(hsKey);
+
+          const isNoccUser = await verifyPeer(senderUidHash);
+          if (!isNoccUser) {
+            console.log('[nocc] peer not registered, skipping handshake for', senderUidHash.slice(0, 8));
+            return;
+          }
+
+          // Peer verified — light up the icon before the handshake completes.
+          if (!channelNoccPeers.has(channelId)) channelNoccPeers.set(channelId, new Set());
+          channelNoccPeers.get(channelId).add(senderUidHash);
+          updateNoccIcon(channelId);
+
           console.log('[nocc] no key for sender, starting handshake with', senderUidHash.slice(0, 8));
           chrome.runtime.sendMessage({
             type: 'nocc-start-handshake',
@@ -130,6 +261,17 @@ function setupMessageDecryptor() {
           setTimeout(() => pendingHandshake.delete(hsKey), 60000);
         }
         return;
+      }
+
+      // Peer messages only: verify with relay once per sender per session
+      // before lighting the icon.
+      if (!isOwnMessage && !(channelNoccPeers.get(channelId)?.has(senderUidHash))) {
+        const isNoccUser = await verifyPeer(senderUidHash);
+        if (isNoccUser) {
+          if (!channelNoccPeers.has(channelId)) channelNoccPeers.set(channelId, new Set());
+          channelNoccPeers.get(channelId).add(senderUidHash);
+          updateNoccIcon(channelId);
+        }
       }
 
       const plain = dec.decode(xorStream(hexToBytes(cipherHex), hexToBytes(tokenHex)));
@@ -144,6 +286,17 @@ function setupMessageDecryptor() {
   function scan() {
     const channelId = getCurrentChannelId();
     if (!channelId) return;
+
+    // Detect channel navigation (Discord SPA) and re-inject UI.
+    const newPath = window.location.pathname;
+    if (newPath !== lastPath) {
+      lastPath = newPath;
+      // Wait a tick for Discord to render the new channel DOM before injecting.
+      setTimeout(() => injectNoccUi(channelId), 300);
+    } else if (!document.getElementById('nocc-toggle') || !document.getElementById('nocc-peer-icon')) {
+      // Re-inject if React reconciliation removed our elements.
+      injectNoccUi(channelId);
+    }
 
     document.querySelectorAll('[class*="markup"] > span, [class*="messageContent"]').forEach((el) => {
       if (el.textContent.startsWith('nocc_')) tryDecrypt(el, channelId);
@@ -170,6 +323,14 @@ function setupMessageDecryptor() {
   // relay socket stays connected during multi-pass handshakes.
   chrome.runtime.connect({ name: 'nocc-keepalive' });
 
+  // Resolve our own uid hash so tryDecrypt can skip our own messages.
+  getMyUidHash().then((h) => { myOwnUidHash = h; });
+
+  injectNoccState();
   listenForEncryptRequests();
   setupMessageDecryptor();
+
+  // Initial UI injection (handles the case where the page was already on a channel).
+  const channelId = getCurrentChannelId();
+  if (channelId) setTimeout(() => injectNoccUi(channelId), 500);
 })();

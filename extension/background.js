@@ -106,6 +106,20 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return;
   }
 
+  if (msg.type === 'nocc-verify-peer') {
+    (async () => {
+      await ensureConnected();
+      if (!socket) { sendResponse({ exists: false }); return; }
+      try {
+        const result = await socket.emitWithAck('verify', { uid_hash: msg.uidHash });
+        sendResponse({ exists: result?.exists === true });
+      } catch (_) {
+        sendResponse({ exists: false });
+      }
+    })();
+    return true;
+  }
+
   if (msg.type === 'nocc-wake') {
     ensureConnected();
     sendResponse({ ok: true });
