@@ -67,6 +67,11 @@ async function getOrCreateOwnChannelKey(channelId, discordUserId) {
   });
 }
 
+function getCurrentChannelId() {
+  const parts = window.location.pathname.split('/');
+  return parts[parts.length - 1] || null;
+}
+
 // --- encryption request handler ---
 // page-inject.js (MAIN world, document_start) intercepts fetch/XHR and asks
 // us to encrypt via postMessage, since only the isolated world has IndexedDB.
@@ -89,6 +94,51 @@ function listenForEncryptRequests(discordUserId) {
   });
 }
 
+// --- message decryptor ---
+// Watches the DOM for rendered messages that start with nocc_ and replaces
+// their visible text with the decrypted plaintext.
+function setupMessageDecryptor(discordUserId) {
+  const dec = new TextDecoder();
+  // Tracks elements mid-decrypt to avoid parallel calls on the same node.
+  const processing = new WeakSet();
+
+  async function tryDecrypt(el, channelId) {
+    const cipher = el.textContent;
+    if (!cipher.startsWith('nocc_')) return;
+    if (processing.has(el)) return;
+
+    processing.add(el);
+    try {
+      const cipherHex = cipher.slice(5);
+      // Hex must be even-length and only hex chars — skip malformed strings.
+      if (cipherHex.length % 2 !== 0 || !/^[0-9a-f]+$/.test(cipherHex)) return;
+
+      const tokenHex = await getOrCreateOwnChannelKey(channelId, discordUserId);
+      const plain = dec.decode(xorStream(hexToBytes(cipherHex), hexToBytes(tokenHex)));
+
+      // Guard: skip if Discord re-rendered the element while we were awaiting.
+      if (el.textContent === cipher) el.textContent = plain;
+    } catch (err) {
+      console.warn('[nocc] decryption failed:', err);
+    } finally {
+      processing.delete(el);
+    }
+  }
+
+  function scan() {
+    const channelId = getCurrentChannelId();
+    if (!channelId) return;
+
+    // Target the innermost content containers Discord uses for message text.
+    document.querySelectorAll('[class*="markup"] > span, [class*="messageContent"]').forEach((el) => {
+      if (el.textContent.startsWith('nocc_')) tryDecrypt(el, channelId);
+    });
+  }
+
+  new MutationObserver(scan).observe(document.body, { childList: true, subtree: true });
+  scan();
+}
+
 // --- entry point ---
 
 (async () => {
@@ -98,6 +148,7 @@ function listenForEncryptRequests(discordUserId) {
     console.log('[nocc] discord id:', id);
     chrome.storage.local.set({ discordUserId: id });
     listenForEncryptRequests(id);
+    setupMessageDecryptor(id);
   } else {
     console.warn('[nocc] could not find a Discord user id (user_id_cache missing/unexpected shape)');
   }
