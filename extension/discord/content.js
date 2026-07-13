@@ -1,8 +1,11 @@
-// Entry point injected into discord.com (isolated world). Extracts the user's
-// own Discord ID and handles encryption requests from page-inject.js (MAIN
-// world) via postMessage — only this side has access to IndexedDB.
+// Entry point injected into discord.com (isolated world).
+//
+// IMPORTANT: window.indexedDB in a content script is the PAGE's IndexedDB
+// (discord.com origin), completely separate from the extension's IndexedDB
+// where background.js stores handshake keys. All key I/O is therefore routed
+// through chrome.runtime.sendMessage so the background worker handles it.
 
-// --- inline helpers (ES module imports not available in classic content scripts) ---
+// --- inline crypto helpers (no ES module imports in classic content scripts) ---
 
 function bytesToHex(bytes) {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
@@ -16,7 +19,6 @@ function hexToBytes(hex) {
   return out;
 }
 
-// XOR with a cycling key so messages longer than the key are still covered.
 function xorStream(msgBytes, keyBytes) {
   const out = new Uint8Array(msgBytes.length);
   for (let i = 0; i < msgBytes.length; i++) {
@@ -25,46 +27,18 @@ function xorStream(msgBytes, keyBytes) {
   return out;
 }
 
-// Returns the most recent own-key token hex for (channelId, discordUserId).
-// Creates and persists a fresh 32-byte random key if none exists yet.
-async function getOrCreateOwnChannelKey(channelId, discordUserId) {
-  return new Promise((resolve, reject) => {
-    const openReq = indexedDB.open('nocc', 1);
+// --- key helpers (delegated to background service worker) ---
 
-    openReq.onupgradeneeded = () => {
-      const store = openReq.result.createObjectStore('keys', { keyPath: 'id', autoIncrement: true });
-      store.createIndex('by_channel_user', ['channel', 'uidHash']);
-    };
+// Read-only lookup — returns token hex or null.
+async function getKey(channelId, uidHash) {
+  const resp = await chrome.runtime.sendMessage({ type: 'nocc-get-key', channel: channelId, uidHash });
+  return resp?.token ?? null;
+}
 
-    openReq.onerror = () => reject(openReq.error);
-
-    openReq.onsuccess = () => {
-      const db = openReq.result;
-      const readTx = db.transaction('keys', 'readonly');
-      const getReq = readTx.objectStore('keys').index('by_channel_user').getAll([channelId, discordUserId]);
-
-      getReq.onerror = () => reject(getReq.error);
-      getReq.onsuccess = () => {
-        const records = getReq.result.sort((a, b) => b.createdAt - a.createdAt);
-        if (records.length > 0) {
-          resolve(records[0].token);
-          return;
-        }
-
-        // No key yet — generate, persist, return.
-        const token = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
-        const writeTx = db.transaction('keys', 'readwrite');
-        const addReq = writeTx.objectStore('keys').add({
-          channel: channelId,
-          uidHash: discordUserId,
-          token,
-          createdAt: Date.now(),
-        });
-        addReq.onerror = () => reject(addReq.error);
-        addReq.onsuccess = () => resolve(token);
-      };
-    };
-  });
+// Returns own key for (channelId, uidHash), creating one if absent.
+async function getOrCreateOwnChannelKey(channelId, uidHash) {
+  const resp = await chrome.runtime.sendMessage({ type: 'nocc-get-or-create-key', channel: channelId, uidHash });
+  return resp?.token ?? null;
 }
 
 function getCurrentChannelId() {
@@ -72,10 +46,24 @@ function getCurrentChannelId() {
   return parts[parts.length - 1] || null;
 }
 
+// Returns the SHA256 UID hash written by background.js after relay connect.
+// Wakes the background if needed and waits up to 3 s.
+async function getMyUidHash() {
+  let { myUidHash } = await chrome.storage.local.get('myUidHash');
+  if (myUidHash) return myUidHash;
+
+  chrome.runtime.sendMessage({ type: 'nocc-wake' }).catch(() => {});
+  for (let i = 0; i < 6; i++) {
+    await new Promise((r) => setTimeout(r, 500));
+    ({ myUidHash } = await chrome.storage.local.get('myUidHash'));
+    if (myUidHash) return myUidHash;
+  }
+  return null;
+}
+
 // --- encryption request handler ---
-// page-inject.js (MAIN world, document_start) intercepts fetch/XHR and asks
-// us to encrypt via postMessage, since only the isolated world has IndexedDB.
-function listenForEncryptRequests(discordUserId) {
+// Format: nocc_{senderUidHash}_{hexCiphertext}
+function listenForEncryptRequests() {
   window.addEventListener('message', async (event) => {
     if (event.source !== window) return;
     if (!event.data || event.data.type !== 'nocc-encrypt-request') return;
@@ -84,8 +72,14 @@ function listenForEncryptRequests(discordUserId) {
     let encrypted = content;
 
     try {
-      const tokenHex = await getOrCreateOwnChannelKey(channelId, discordUserId);
-      encrypted = 'nocc_' + bytesToHex(xorStream(new TextEncoder().encode(content), hexToBytes(tokenHex)));
+      const myUidHash = await getMyUidHash();
+      if (!myUidHash) throw new Error('uid hash not ready');
+
+      const tokenHex = await getOrCreateOwnChannelKey(channelId, myUidHash);
+      if (!tokenHex) throw new Error('could not get own key');
+
+      const cipherHex = bytesToHex(xorStream(new TextEncoder().encode(content), hexToBytes(tokenHex)));
+      encrypted = `nocc_${myUidHash}_${cipherHex}`;
     } catch (err) {
       console.warn('[nocc] encryption failed, forwarding plaintext:', err);
     }
@@ -95,29 +89,51 @@ function listenForEncryptRequests(discordUserId) {
 }
 
 // --- message decryptor ---
-// Watches the DOM for rendered messages that start with nocc_ and replaces
-// their visible text with the decrypted plaintext.
-function setupMessageDecryptor(discordUserId) {
+// Watches the DOM for nocc_{64hexSenderUid}_{hexCipher} messages.
+// If the sender's key is not on file, triggers a handshake and retries.
+function setupMessageDecryptor() {
   const dec = new TextDecoder();
-  // Tracks elements mid-decrypt to avoid parallel calls on the same node.
   const processing = new WeakSet();
+  const pendingHandshake = new Set();
+
+  let scheduledScan = false;
+  function scheduleScan(delayMs) {
+    if (scheduledScan) return;
+    scheduledScan = true;
+    setTimeout(() => { scheduledScan = false; scan(); }, delayMs);
+  }
 
   async function tryDecrypt(el, channelId) {
-    const cipher = el.textContent;
-    if (!cipher.startsWith('nocc_')) return;
+    const text = el.textContent;
+    const match = text.match(/^nocc_([0-9a-f]{64})_([0-9a-f]+)$/);
+    if (!match) return;
     if (processing.has(el)) return;
 
     processing.add(el);
     try {
-      const cipherHex = cipher.slice(5);
-      // Hex must be even-length and only hex chars — skip malformed strings.
-      if (cipherHex.length % 2 !== 0 || !/^[0-9a-f]+$/.test(cipherHex)) return;
+      const [, senderUidHash, cipherHex] = match;
+      if (cipherHex.length % 2 !== 0) return;
 
-      const tokenHex = await getOrCreateOwnChannelKey(channelId, discordUserId);
+      const tokenHex = await getKey(channelId, senderUidHash);
+
+      if (!tokenHex) {
+        const hsKey = `${channelId}:${senderUidHash}`;
+        if (!pendingHandshake.has(hsKey)) {
+          pendingHandshake.add(hsKey);
+          console.log('[nocc] no key for sender, starting handshake with', senderUidHash.slice(0, 8));
+          chrome.runtime.sendMessage({
+            type: 'nocc-start-handshake',
+            peerId: senderUidHash,
+            channel: channelId,
+          }).catch(() => {});
+          scheduleScan(12000);
+          setTimeout(() => pendingHandshake.delete(hsKey), 60000);
+        }
+        return;
+      }
+
       const plain = dec.decode(xorStream(hexToBytes(cipherHex), hexToBytes(tokenHex)));
-
-      // Guard: skip if Discord re-rendered the element while we were awaiting.
-      if (el.textContent === cipher) el.textContent = plain;
+      if (el.textContent === text) el.textContent = plain;
     } catch (err) {
       console.warn('[nocc] decryption failed:', err);
     } finally {
@@ -129,7 +145,6 @@ function setupMessageDecryptor(discordUserId) {
     const channelId = getCurrentChannelId();
     if (!channelId) return;
 
-    // Target the innermost content containers Discord uses for message text.
     document.querySelectorAll('[class*="markup"] > span, [class*="messageContent"]').forEach((el) => {
       if (el.textContent.startsWith('nocc_')) tryDecrypt(el, channelId);
     });
@@ -147,9 +162,14 @@ function setupMessageDecryptor(discordUserId) {
   if (id) {
     console.log('[nocc] discord id:', id);
     chrome.storage.local.set({ discordUserId: id });
-    listenForEncryptRequests(id);
-    setupMessageDecryptor(id);
   } else {
     console.warn('[nocc] could not find a Discord user id (user_id_cache missing/unexpected shape)');
   }
+
+  // Keep the background service worker alive while this tab is open so the
+  // relay socket stays connected during multi-pass handshakes.
+  chrome.runtime.connect({ name: 'nocc-keepalive' });
+
+  listenForEncryptRequests();
+  setupMessageDecryptor();
 })();

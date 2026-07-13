@@ -36,9 +36,10 @@ export function createHandshakeSession({ myId, peerId, channel, send, onLog = ()
   }
 
   async function start() {
+    if (stage !== 'idle') return; // already in progress or done — don't restart
+    stage = 'A-initiator-waiting-pass2'; // claim stage before await to close the race window
     const ownPadBytes = await pad();
     sendPass(1, xorBytes(ownKey, ownPadBytes));
-    stage = 'A-initiator-waiting-pass2';
   }
 
   async function startLegB() {
@@ -48,6 +49,7 @@ export function createHandshakeSession({ myId, peerId, channel, send, onLog = ()
   }
 
   async function handleIncoming(payload) {
+    if (stage === 'done') return; // ignore stale relay traffic after completion
     if (payload.sent_from !== peerId || payload.channel !== channel) return;
 
     const ownPadBytes = await pad();
