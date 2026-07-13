@@ -11,7 +11,14 @@
     "type": "module"
   },
   "permissions": ["storage"],
-  "host_permissions": ["http://localhost:3000/*", "https://discord.com/*"],
+  "host_permissions": [
+    "http://localhost:3000/*",
+    "https://discord.com/*",
+    "https://tenor.com/*",
+    "https://c.tenor.com/*",
+    "https://giphy.com/*",
+    "https://media.giphy.com/*"
+  ],
   "content_scripts": [
     {
       "matches": ["https://discord.com/*"],

@@ -165,6 +165,35 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === 'nocc-resolve-embed') {
+    (async () => {
+      const ALLOWED = ['tenor.com', 'www.tenor.com', 'c.tenor.com', 'giphy.com', 'www.giphy.com', 'media.giphy.com'];
+      try {
+        const host = new URL(msg.url).hostname;
+        if (!ALLOWED.includes(host)) { sendResponse(null); return; }
+        const res = await fetch(msg.url, { headers: { Accept: 'text/html' } });
+        if (!res.ok) { sendResponse(null); return; }
+        const html = await res.text();
+
+        function metaContent(property) {
+          return (
+            html.match(new RegExp(`<meta[^>]+(?:property|name)=["']${property}["'][^>]+content=["']([^"']+)["']`, 'i'))?.[1] ||
+            html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${property}["']`, 'i'))?.[1] ||
+            null
+          );
+        }
+
+        sendResponse({
+          imageUrl: metaContent('og:image') || metaContent('twitter:image') || null,
+          videoUrl: metaContent('og:video') || metaContent('og:video:url') || null,
+        });
+      } catch (_) {
+        sendResponse(null);
+      }
+    })();
+    return true;
+  }
+
   if (msg.type === 'nocc-start-handshake') {
     (async () => {
       await ensureConnected();

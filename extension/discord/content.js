@@ -202,6 +202,84 @@ function listenForEncryptRequests() {
   });
 }
 
+// --- embed helpers ---
+
+const EMBED_URL_RE = /^https?:\/\/\S+$/;
+const EMBED_IMAGE_RE = /\.(gif|jpg|jpeg|png|webp)(\?[^#]*)?(?:#.*)?$/i;
+const EMBED_VIDEO_RE = /\.(mp4|webm)(\?[^#]*)?(?:#.*)?$/i;
+const TENOR_RE = /^https?:\/\/(www\.)?tenor\.com\//i;
+const GIPHY_RE = /^https?:\/\/(www\.)?giphy\.com\//i;
+
+function makeEmbedImage(src, href) {
+  const a = document.createElement('a');
+  a.href = href;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  const img = document.createElement('img');
+  img.src = src;
+  Object.assign(img.style, { maxWidth: '400px', maxHeight: '300px', borderRadius: '4px', display: 'block', cursor: 'pointer' });
+  img.onerror = () => { a.remove(); };
+  a.appendChild(img);
+  return a;
+}
+
+function makeEmbedVideo(src, href) {
+  const vid = document.createElement('video');
+  vid.src = src;
+  vid.autoplay = true;
+  vid.loop = true;
+  vid.muted = true;
+  vid.playsInline = true;
+  Object.assign(vid.style, { maxWidth: '400px', maxHeight: '300px', borderRadius: '4px', display: 'block', cursor: 'pointer' });
+  vid.onerror = () => { vid.remove(); };
+  vid.addEventListener('click', () => window.open(href || src, '_blank'));
+  return vid;
+}
+
+async function tryInjectEmbed(el, plain) {
+  const url = plain.trim();
+  if (!EMBED_URL_RE.test(url)) return;
+
+  // Append embed to the nearest markup container, or the element itself.
+  const container = el.closest('[class*="markup"]') || el;
+  if (container.querySelector('.nocc-embed')) return;
+
+  // Make the decrypted URL text itself clickable.
+  if (el.textContent === url) {
+    el.textContent = '';
+    const a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.textContent = url;
+    Object.assign(a.style, { color: '#00b0f4', wordBreak: 'break-all' });
+    el.appendChild(a);
+  }
+
+  const wrap = document.createElement('div');
+  wrap.className = 'nocc-embed';
+  Object.assign(wrap.style, { marginTop: '6px' });
+
+  if (EMBED_IMAGE_RE.test(url)) {
+    wrap.appendChild(makeEmbedImage(url, url));
+  } else if (EMBED_VIDEO_RE.test(url)) {
+    wrap.appendChild(makeEmbedVideo(url, url));
+  } else if (TENOR_RE.test(url) || GIPHY_RE.test(url)) {
+    const embed = await chrome.runtime.sendMessage({ type: 'nocc-resolve-embed', url }).catch(() => null);
+    if (embed?.videoUrl) {
+      wrap.appendChild(makeEmbedVideo(embed.videoUrl, url));
+    } else if (embed?.imageUrl) {
+      wrap.appendChild(makeEmbedImage(embed.imageUrl, url));
+    } else {
+      return; // link is already shown; no image to inject
+    }
+  } else {
+    return; // plain link only, no embed
+  }
+
+  container.appendChild(wrap);
+}
+
 // --- message decryptor ---
 function setupMessageDecryptor() {
   const dec = new TextDecoder();
@@ -285,7 +363,10 @@ function setupMessageDecryptor() {
       }
 
       const plain = dec.decode(xorStream(hexToBytes(cipherHex), hexToBytes(tokenHex)));
-      if (el.textContent === text) el.textContent = plain;
+      if (el.textContent === text) {
+        el.textContent = plain;
+        tryInjectEmbed(el, plain); // fire-and-forget; handles URLs and GIFs
+      }
     } catch (err) {
       console.warn('[nocc] decryption failed:', err);
     } finally {
