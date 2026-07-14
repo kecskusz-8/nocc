@@ -39,7 +39,7 @@ U2's own key, K2, makes the same three-pass trip in the other direction. Once bo
 
 User IDs are never sent in the clear either. The extension hashes them (`SHA256(uid + salt + pepper)`) before anything reaches the relay, so even the relay operator can't map a socket back to a real Discord account without already knowing who they're looking for.
 
-Full technical breakdown, including the key rotation schedule: [`ARCHITECTURE.md`](ARCHITECTURE.md).
+Full technical breakdown, including the key rotation schedule: [`ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Installation
 
@@ -49,7 +49,7 @@ Full technical breakdown, including the key rotation schedule: [`ARCHITECTURE.md
 2. Load the extension unpacked ([full instructions](extension/README.md)).
 3. Open Discord. You're encrypted with anyone else running NOCC, using the default relay, no setup required.
 
-Full walkthrough: [`INSTALL.md`](INSTALL.md).
+Full walkthrough: [`INSTALL.md`](docs/INSTALL.md).
 
 ### Self-hosting the relay
 
@@ -64,7 +64,7 @@ DATABASE_URL=postgres://user:pass@localhost:5432/nocc \
 node index.js
 ```
 
-Then point your extension at it. Full server docs: [`server/README.md`](server/README.md). Full deployment guide (Docker, systemd, Cloudflare Tunnel): [`DEPLOY.md`](DEPLOY.md).
+Then point your extension at it. Full server docs: [`server/README.md`](server/README.md). Full deployment guide (Docker, systemd, Cloudflare Tunnel): [`DEPLOY.md`](docs/DEPLOY.md).
 
 ## Configuration
 
@@ -105,11 +105,11 @@ GPLv3. See [`LICENSE`](LICENSE). Copyleft, on purpose: if you improve NOCC and s
 
 ## Contributing
 
-Short version: open an issue, open a PR, keep it simple. Full guide: [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Short version: open an issue, open a PR, keep it simple. Full guide: [`CONTRIBUTING.md`](docs/CONTRIBUTING.md).
 
 ## Security
 
-Found a vulnerability? Please read [`SECURITY.md`](SECURITY.md) before you post it publicly.
+Found a vulnerability? Please read [`SECURITY.md`](docs/SECURITY.md) before you post it publicly.
 
 ## Acknowledgments
 
