@@ -47,6 +47,13 @@ async function getOrCreateSession(peerId, channel) {
         await saveKey({ channel, uidHash: myUidHash, token: ownKey, createdAt });
       }
       await saveKey({ channel, uidHash: peerId, token: peerKey, createdAt });
+
+      // Tell every open Discord tab to re-scan — messages that arrived before
+      // the handshake (e.g. from an offline peer) can now be decrypted.
+      const note = { type: 'nocc-handshake-complete', channel, peerId };
+      for (const port of activePorts) {
+        try { port.postMessage(note); } catch (_) {}
+      }
     },
   });
 
@@ -214,11 +221,17 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
 // Keep the service worker alive while any Discord tab has the extension
 // connected — prevents the relay socket from being killed mid-handshake.
+// Active ports are also used to notify tabs when a handshake completes so
+// they can re-scan messages that arrived before the key exchange finished.
+const activePorts = new Set();
+
 chrome.runtime.onConnect.addListener((port) => {
+  activePorts.add(port);
   port.onDisconnect.addListener(() => {
     // Reading lastError suppresses the "Unchecked runtime.lastError" warning
     // that fires when the port closes because the page entered bfcache.
     void chrome.runtime.lastError;
+    activePorts.delete(port);
   });
 });
 
