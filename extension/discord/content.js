@@ -82,6 +82,10 @@ const channelNoccPeers = new Map();
 // Own uid hash — populated at startup to filter our own messages from tryDecrypt.
 let myOwnUidHash = null;
 
+// Callback set by setupMessageDecryptor so the keepalive port listener can
+// trigger a re-scan when background signals a handshake has completed.
+let rescan = null;
+
 // --- UI injection ---
 
 function updateNoccIcon(channelId) {
@@ -304,6 +308,7 @@ function setupMessageDecryptor() {
     pendingScan = true;
     setTimeout(() => { pendingScan = false; scan(); }, 50);
   }
+  rescan = queueScan; // expose to the keepalive port handler
 
   async function tryDecrypt(el, channelId) {
     const text = el.textContent;
@@ -330,7 +335,10 @@ function setupMessageDecryptor() {
 
           const isNoccUser = await verifyPeer(senderUidHash);
           if (!isNoccUser) {
-            console.log('[nocc] peer not registered, skipping handshake for', senderUidHash.slice(0, 8));
+            // Peer not on relay yet — release the lock after 30 s so that
+            // when they come online and a new scan fires we try again.
+            console.log('[nocc] peer not on relay, will retry for', senderUidHash.slice(0, 8));
+            setTimeout(() => pendingHandshake.delete(hsKey), 30_000);
             return;
           }
 
@@ -422,6 +430,11 @@ function setupMessageDecryptor() {
       // Reading lastError suppresses the "Unchecked runtime.lastError" warning
       // that Brave/Chrome emits when the port closes due to bfcache entry.
       void chrome.runtime.lastError;
+    });
+    port.onMessage.addListener((msg) => {
+      // Background tells us a handshake just completed — re-scan so messages
+      // that arrived before the key exchange can now be decrypted.
+      if (msg.type === 'nocc-handshake-complete') rescan?.();
     });
   }
   connectKeepalive();
