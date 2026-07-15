@@ -35,6 +35,15 @@ function attachSocketHandlers(io) {
     socket.on('verify', async ({ uid_hash } = {}, callback) => {
       if (typeof callback !== 'function') return;
 
+      if (!socket.data.uidHash) return callback({ error: 'not registered' });
+
+      const now = Date.now();
+      if (!socket.data.verifyCount || now - socket.data.verifyWindow > 60_000) {
+        socket.data.verifyCount = 0;
+        socket.data.verifyWindow = now;
+      }
+      if (++socket.data.verifyCount > 20) return callback({ error: 'rate limited' });
+
       if (!isValidHash(uid_hash)) {
         return callback({ error: 'uid_hash must be a 64-character hex string' });
       }
