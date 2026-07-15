@@ -1,4 +1,10 @@
+const crypto = require('crypto');
 const { isValidHash, registerUser, userExists } = require('../services/users');
+
+// ip → Set of active socket IDs
+const connectionsByIp = new Map();
+// ip → { count, windowStart } for per-IP registration rate limiting
+const registersByIp = new Map();
 
 // Returns false (and bumps the counter) when the socket has exceeded `max`
 // calls within a rolling `windowMs` millisecond window.
@@ -15,8 +21,55 @@ function checkRateLimit(socket, key, max, windowMs) {
 
 function attachSocketHandlers(io) {
   io.on('connection', (socket) => {
+    const ip = socket.handshake.address.replace(/^::ffff:/, '');
+
+    // IP connection cap: max 10 concurrent sockets per IP
+    if (!connectionsByIp.has(ip)) connectionsByIp.set(ip, new Set());
+    const ipConns = connectionsByIp.get(ip);
+    if (ipConns.size >= 10) { socket.disconnect(true); return; }
+    ipConns.add(socket.id);
+
+    // Send PoW challenge — client must solve before register is accepted
+    const nonce = crypto.randomBytes(16).toString('hex');
+    socket.data.challenge = nonce;
+    socket.data.powSolved = false;
+    socket.emit('pow_challenge', { nonce, difficulty: 20 });
+
+    socket.on('disconnect', () => {
+      ipConns.delete(socket.id);
+      if (ipConns.size === 0) connectionsByIp.delete(ip);
+    });
+
+    socket.on('pow', ({ solution } = {}, callback) => {
+      if (typeof callback !== 'function') return;
+      if (socket.data.powSolved) return callback({ ok: true });
+
+      const hash = crypto
+        .createHash('sha256')
+        .update(`${socket.data.challenge}:${solution}`)
+        .digest();
+
+      // 20 leading zero bits: bytes 0–1 = 0x00, top nibble of byte 2 = 0x0
+      if (hash[0] === 0 && hash[1] === 0 && (hash[2] & 0xf0) === 0) {
+        socket.data.powSolved = true;
+        callback({ ok: true });
+      } else {
+        callback({ ok: false });
+      }
+    });
+
     socket.on('register', async ({ uid_hash } = {}) => {
       if (socket.data.uidHash) return;
+      if (!socket.data.powSolved) return;
+
+      // IP register rate limit: 2 per 10 minutes
+      const now = Date.now();
+      const reg = registersByIp.get(ip) ?? { count: 0, windowStart: now };
+      if (now - reg.windowStart > 600_000) { reg.count = 0; reg.windowStart = now; }
+      if (reg.count >= 2) return;
+      reg.count++;
+      registersByIp.set(ip, reg);
+
       if (!checkRateLimit(socket, 'register', 5, 60_000)) return;
       if (!isValidHash(uid_hash)) return;
 

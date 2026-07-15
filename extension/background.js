@@ -17,6 +17,22 @@ let reconnectTimer = null;
 let signingPrivKey = null;
 let signingPubKeyHex = null;
 
+async function solvePoW(nonce, difficulty) {
+  const fullBytes = Math.floor(difficulty / 8);
+  const remainBits = difficulty % 8;
+  const remainMask = remainBits ? (0xff << (8 - remainBits)) & 0xff : 0;
+  const enc = new TextEncoder();
+  for (let solution = 0; ; solution++) {
+    const hash = new Uint8Array(
+      await crypto.subtle.digest('SHA-256', enc.encode(`${nonce}:${solution}`))
+    );
+    let ok = true;
+    for (let i = 0; i < fullBytes; i++) if (hash[i] !== 0) { ok = false; break; }
+    if (ok && remainBits && (hash[fullBytes] & remainMask) !== 0) ok = false;
+    if (ok) return solution;
+  }
+}
+
 async function ensureSigningKeyPair() {
   if (signingPrivKey) return;
   const stored = await chrome.storage.local.get(['signingPrivKeyJwk', 'signingPubKeyHex']);
@@ -105,6 +121,10 @@ function connect(onRegistered) {
       myUidHash = id;
       await chrome.storage.local.set({ myUidHash });
       await ensureSigningKeyPair();
+
+      const { nonce, difficulty } = await new Promise(res => socket.once('pow_challenge', res));
+      const solution = await solvePoW(nonce, difficulty);
+      await socket.emitWithAck('pow', { solution });
 
       socket.emit('register', { uid_hash: myUidHash });
       console.log('[nocc] registered as', myUidHash);
