@@ -18,7 +18,8 @@
 import { randomBytes, hexToBytes, bytesToHex, concatBytes, aesGcmEncrypt, aesGcmDecrypt } from './random.js';
 
 const CURVE = 'P-256';
-const PUB_KEY_LEN = 65; // uncompressed point: 0x04 || x || y
+const PUB_KEY_LEN = 65;    // uncompressed P-256 point: 0x04 || x || y
+const SIGN_PUB_LEN = 32;   // raw Ed25519 public key
 
 async function genKeyPair() {
   return crypto.subtle.generateKey({ name: 'ECDH', namedCurve: CURVE }, false, ['deriveBits']);
@@ -44,11 +45,13 @@ async function deriveWrapKey(privateKey, peerPublicKey, channel) {
   return new Uint8Array(bits);
 }
 
-export function createHandshakeSession({ myId, peerId, channel, send, onLog = () => {}, onComplete = () => {}, providedOwnKey = null }) {
+export function createHandshakeSession({ myId, peerId, channel, send, onLog = () => {}, onComplete = () => {}, providedOwnKey = null, mySigningPubKeyHex = null }) {
   const ownKeyBytes = providedOwnKey ? hexToBytes(providedOwnKey) : randomBytes(32);
+  const mySigningPubBytes = mySigningPubKeyHex ? hexToBytes(mySigningPubKeyHex) : new Uint8Array(SIGN_PUB_LEN);
 
-  let kp = null;       // ephemeral CryptoKeyPair
-  let wrapKey = null;  // Uint8Array[32], stored by responder between pass 1 and pass 3
+  let kp = null;              // ephemeral ECDH CryptoKeyPair
+  let wrapKey = null;         // Uint8Array[32], stored by responder between pass 1 and pass 3
+  let peerSigningPubHex = null;
   let stage = 'idle';
 
   function sendPass(pass, data) {
@@ -61,7 +64,8 @@ export function createHandshakeSession({ myId, peerId, channel, send, onLog = ()
     stage = 'init-waiting-pass2';
     kp = await genKeyPair();
     const pubRaw = new Uint8Array(await crypto.subtle.exportKey('raw', kp.publicKey));
-    sendPass(1, pubRaw);
+    // pass 1 payload: ECDH pubkey (65 B) || Ed25519 signing pubkey (32 B)
+    sendPass(1, concatBytes(pubRaw, mySigningPubBytes));
   }
 
   async function handleIncoming(payload) {
@@ -79,13 +83,18 @@ export function createHandshakeSession({ myId, peerId, channel, send, onLog = ()
         kp = null;
       }
 
+      // pass 1 payload: ECDH pubkey (65 B) || signing pubkey (32 B)
+      const peerEcdhPubRaw = data.slice(0, PUB_KEY_LEN);
+      peerSigningPubHex = bytesToHex(data.slice(PUB_KEY_LEN, PUB_KEY_LEN + SIGN_PUB_LEN));
+
       kp = await genKeyPair();
-      const peerPub = await importPub(data);
+      const peerPub = await importPub(peerEcdhPubRaw);
       wrapKey = await deriveWrapKey(kp.privateKey, peerPub, channel);
 
       const wrappedOwn = await aesGcmEncrypt(ownKeyBytes, wrapKey);
       const pubRaw = new Uint8Array(await crypto.subtle.exportKey('raw', kp.publicKey));
-      sendPass(2, concatBytes(pubRaw, wrappedOwn));
+      // pass 2 payload: ECDH pubkey (65 B) || signing pubkey (32 B) || wrapped key (60 B)
+      sendPass(2, concatBytes(concatBytes(pubRaw, mySigningPubBytes), wrappedOwn));
       stage = 'resp-waiting-pass3';
       return;
     }
@@ -93,10 +102,12 @@ export function createHandshakeSession({ myId, peerId, channel, send, onLog = ()
     if (payload.pass === 2) {
       if (stage !== 'init-waiting-pass2') return;
 
-      const respPubRaw = data.slice(0, PUB_KEY_LEN);
-      const wrappedPeerKey = data.slice(PUB_KEY_LEN);
+      // pass 2 payload: ECDH pubkey (65 B) || signing pubkey (32 B) || wrapped key (60 B)
+      const respEcdhPubRaw = data.slice(0, PUB_KEY_LEN);
+      peerSigningPubHex = bytesToHex(data.slice(PUB_KEY_LEN, PUB_KEY_LEN + SIGN_PUB_LEN));
+      const wrappedPeerKey = data.slice(PUB_KEY_LEN + SIGN_PUB_LEN);
 
-      const respPub = await importPub(respPubRaw);
+      const respPub = await importPub(respEcdhPubRaw);
       wrapKey = await deriveWrapKey(kp.privateKey, respPub, channel);
 
       const peerKeyBytes = await aesGcmDecrypt(wrappedPeerKey, wrapKey);
@@ -104,7 +115,7 @@ export function createHandshakeSession({ myId, peerId, channel, send, onLog = ()
       sendPass(3, wrappedOwn);
 
       stage = 'done';
-      onComplete({ ownKey: bytesToHex(ownKeyBytes), peerKey: bytesToHex(peerKeyBytes) });
+      onComplete({ ownKey: bytesToHex(ownKeyBytes), peerKey: bytesToHex(peerKeyBytes), peerSigningPubKey: peerSigningPubHex });
       return;
     }
 
@@ -113,7 +124,7 @@ export function createHandshakeSession({ myId, peerId, channel, send, onLog = ()
 
       const initKeyBytes = await aesGcmDecrypt(data, wrapKey);
       stage = 'done';
-      onComplete({ ownKey: bytesToHex(ownKeyBytes), peerKey: bytesToHex(initKeyBytes) });
+      onComplete({ ownKey: bytesToHex(ownKeyBytes), peerKey: bytesToHex(initKeyBytes), peerSigningPubKey: peerSigningPubHex });
     }
   }
 

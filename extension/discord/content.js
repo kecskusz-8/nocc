@@ -52,6 +52,21 @@ async function verifyPeer(uidHash) {
   return resp?.exists === true;
 }
 
+async function signMessage(data) {
+  const resp = await chrome.runtime.sendMessage({ type: 'nocc-sign', data });
+  return resp?.sig ?? null;
+}
+
+async function getSigningPubKey(uidHash) {
+  const resp = await chrome.runtime.sendMessage({ type: 'nocc-get-signing-pubkey', uidHash });
+  return resp?.pubKeyHex ?? null;
+}
+
+async function verifyEdSig(pubKeyHex, sigHex, message) {
+  const pubKey = await crypto.subtle.importKey('raw', hexToBytes(pubKeyHex), { name: 'Ed25519' }, false, ['verify']);
+  return crypto.subtle.verify({ name: 'Ed25519' }, pubKey, hexToBytes(sigHex), new TextEncoder().encode(message));
+}
+
 function getCurrentChannelId() {
   const parts = window.location.pathname.split('/');
   return parts[parts.length - 1] || null;
@@ -205,7 +220,11 @@ function listenForEncryptRequests() {
       if (!tokenHex) throw new Error('could not get own key');
 
       const cipherBytes = await aesGcmEncrypt(new TextEncoder().encode(content), hexToBytes(tokenHex));
-      encrypted = `nocc2_${myUidHash}_${bytesToHex(cipherBytes)}`;
+      const cipherHex = bytesToHex(cipherBytes);
+      const msgToSign = `nocc2_${myUidHash}_${cipherHex}`;
+      const sigHex = await signMessage(msgToSign);
+      if (!sigHex) throw new Error('signing failed');
+      encrypted = `${msgToSign}_${sigHex}`;
     } catch (err) {
       console.warn('[nocc] encryption failed, forwarding plaintext:', err);
     }
@@ -320,13 +339,13 @@ function setupMessageDecryptor() {
 
   async function tryDecrypt(el, channelId) {
     const text = el.textContent;
-    const match = text.match(/^nocc2_([0-9a-f]{64})_([0-9a-f]+)$/);
+    const match = text.match(/^nocc2_([0-9a-f]{64})_([0-9a-f]+)_([0-9a-f]{128})$/);
     if (!match) return;
     if (processing.has(el)) return;
 
     processing.add(el);
     try {
-      const [, senderUidHash, cipherHex] = match;
+      const [, senderUidHash, cipherHex, sigHex] = match;
       if (cipherHex.length % 2 !== 0) return;
 
       const isOwnMessage = myOwnUidHash && senderUidHash === myOwnUidHash;
@@ -375,6 +394,17 @@ function setupMessageDecryptor() {
           if (!channelNoccPeers.has(channelId)) channelNoccPeers.set(channelId, new Set());
           channelNoccPeers.get(channelId).add(senderUidHash);
           updateNoccIcon(channelId);
+        }
+      }
+
+      if (!isOwnMessage) {
+        const pubKeyHex = await getSigningPubKey(senderUidHash);
+        if (pubKeyHex) {
+          const valid = await verifyEdSig(pubKeyHex, sigHex, `nocc2_${senderUidHash}_${cipherHex}`);
+          if (!valid) {
+            console.warn('[nocc] invalid signature from', senderUidHash.slice(0, 8));
+            return;
+          }
         }
       }
 
