@@ -19,7 +19,7 @@ There's no store listing. You load it directly from the source, which also means
 3. **Firefox:**
    - Go to `about:debugging#/runtime/this-firefox`
    - Click **Load Temporary Add-on**, then select `nocc/extension/manifest.json`
-4. Open Discord (or reload the tab if it was already open).
+4. Open the chat platform you're using NOCC with (or reload the tab if it was already open).
 
 That's it. No account, no signup, no config screen to get through.
 
@@ -55,7 +55,7 @@ For a real deployment (public reachability, TLS, restart-on-boot), follow [`DEPL
    - **Relay URL**, e.g. `wss://relay.yourdomain.com` (use `wss://`, not `ws://`, for anything beyond local testing; see [`DEPLOY.md`](DEPLOY.md))
    - **Salt**, the exact `SALT` value your relay is running with
    - **Pepper**, if your relay set one, the exact `PEPPER` value (leave blank if it didn't)
-3. Save. Reload any open Discord tabs.
+3. Save. Reload any open tabs for the chat platform you're using.
 
 Everyone you want to talk to on this relay needs the same three values. Mismatched salt/pepper means your hashed UIDs never line up, and the handshake will just hang. See [Troubleshooting](extension/README.md#troubleshooting).
 
@@ -63,8 +63,8 @@ Everyone you want to talk to on this relay needs the same three values. Mismatch
 
 1. DM another NOCC user (on the same relay, default or custom).
 2. Send a message. Watch for the extension's encryption indicator to confirm keys have been exchanged for this conversation.
-3. To actually confirm the message left your browser encrypted, not just trust the extension's own status display: open your browser's **Network** tab (DevTools) before sending, watch the outgoing request to Discord's message API, and confirm the message body is ciphertext, not your plaintext.
+3. To actually confirm the message left your browser encrypted, not just trust the extension's own status display: open your browser's **Network** tab (DevTools) before sending, watch the outgoing request to the platform's message API, and confirm the message body is ciphertext, not your plaintext.
 4. On the receiving end, the message should render as normal readable text, decrypted client-side, in place, by the extension.
-5. If you want to see it fail safely: message someone *not* running NOCC. It should send as a normal, unencrypted Discord message, with no encryption indicator and no ciphertext. NOCC only encrypts when both sides have it.
+5. If you want to see it fail safely: message someone *not* running NOCC. It should send as a normal, unencrypted message, with no encryption indicator and no ciphertext. NOCC only encrypts when both sides have it.
 
 If the encryption indicator never appears, see [Troubleshooting](extension/README.md#troubleshooting) in the extension docs.

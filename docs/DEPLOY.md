@@ -183,7 +183,7 @@ If you want operational visibility (uptime, connection counts) without compromis
 
 ## Scaling considerations
 
-NOCC's relay is built for **under 10 concurrent users**: a friend group, a small Discord server. Some honest implications of that:
+NOCC's relay is built for **under 10 concurrent users**: a friend group, a small community. Some honest implications of that:
 
 - Socket.io rooms handle routing per-process. If you run multiple relay instances behind a load balancer, users could land on different instances and never find each other, since rooms aren't shared across processes. Don't put this behind a multi-instance autoscaler without adding a shared adapter (e.g. Socket.io's Redis adapter) first, and if you're doing that, you've outgrown what this project is trying to be.
 - A single small VPS with a local Postgres instance can comfortably handle far more than 10 users from a raw resource perspective. The ceiling here is a design choice about trust and scale, not a hard technical limit. NOCC is not trying to be Signal's infrastructure; it's trying to keep a specific small group's conversations unreadable to a specific kind of dragnet.

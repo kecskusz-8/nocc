@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "NOCC (dev)",
   "version": "0.0.1",
-  "description": "End-to-end encrypted messaging layer for Discord.",
+  "description": "End-to-end encrypted messaging layer for chat platforms — hook required.",
   "action": {
     "default_popup": "popup.html"
   },
@@ -12,23 +12,7 @@
   },
   "permissions": ["storage"],
   "host_permissions": [
-    "http://localhost:3000/*",
-    "https://discord.com/*",
-    "https://tenor.com/*",
-    "https://c.tenor.com/*",
-    "https://giphy.com/*",
-    "https://media.giphy.com/*"
+    "http://localhost:3000/*"
   ],
-  "content_scripts": [
-    {
-      "matches": ["https://discord.com/*"],
-      "js": ["discord/page-inject.js"],
-      "run_at": "document_start",
-      "world": "MAIN"
-    },
-    {
-      "matches": ["https://discord.com/*"],
-      "js": ["discord/get-user-id.js", "discord/content.js"]
-    }
-  ]
+  "content_scripts": []
 }
