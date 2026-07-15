@@ -1,5 +1,11 @@
 const { isValidHash, registerUser, userExists } = require('../services/users');
 
+// ip → Set of active socket IDs
+const connectionsByIp = new Map();
+// ip → { hashes: Set<uid_hash>, windowStart } — only genuinely new uid_hashes
+// count against the limit; reconnects (same uid_hash re-registering) are free.
+const registersByIp = new Map();
+
 // Returns false (and bumps the counter) when the socket has exceeded `max`
 // calls within a rolling `windowMs` millisecond window.
 function checkRateLimit(socket, key, max, windowMs) {
@@ -15,10 +21,32 @@ function checkRateLimit(socket, key, max, windowMs) {
 
 function attachSocketHandlers(io) {
   io.on('connection', (socket) => {
+    const ip = socket.handshake.address.replace(/^::ffff:/, '');
+
+    // IP connection cap: max 10 concurrent sockets per IP
+    if (!connectionsByIp.has(ip)) connectionsByIp.set(ip, new Set());
+    const ipConns = connectionsByIp.get(ip);
+    if (ipConns.size >= 10) { socket.disconnect(true); return; }
+    ipConns.add(socket.id);
+
+    socket.on('disconnect', () => {
+      ipConns.delete(socket.id);
+      if (ipConns.size === 0) connectionsByIp.delete(ip);
+    });
+
     socket.on('register', async ({ uid_hash } = {}) => {
       if (socket.data.uidHash) return;
       if (!checkRateLimit(socket, 'register', 5, 60_000)) return;
       if (!isValidHash(uid_hash)) return;
+
+      // IP register rate limit: max 2 distinct uid_hashes per 10 minutes.
+      // Reconnects (same uid_hash) don't consume a slot.
+      const now = Date.now();
+      const reg = registersByIp.get(ip) ?? { hashes: new Set(), windowStart: now };
+      if (now - reg.windowStart > 600_000) { reg.hashes = new Set(); reg.windowStart = now; }
+      if (!reg.hashes.has(uid_hash) && reg.hashes.size >= 2) return;
+      reg.hashes.add(uid_hash);
+      registersByIp.set(ip, reg);
 
       try {
         socket.join(uid_hash);
