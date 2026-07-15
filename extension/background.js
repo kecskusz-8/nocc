@@ -4,14 +4,34 @@
 
 import { connectToRelay } from './lib/relay-socket.js';
 import { createHandshakeSession } from './crypto/three-pass.js';
-import { saveKey, getKeysFor, getAllKeys } from './storage/key-store.js';
+import { saveKey, getKeysFor, getAllKeys, saveSigningKey, getSigningKey } from './storage/key-store.js';
 import { getMyId } from './identity.js';
+import { bytesToHex, hexToBytes } from './crypto/random.js';
 
 let socket = null;
 let myUidHash = null;
 const sessions = new Map();
 let pendingConnection = null;
 let reconnectTimer = null;
+
+let signingPrivKey = null;
+let signingPubKeyHex = null;
+
+async function ensureSigningKeyPair() {
+  if (signingPrivKey) return;
+  const stored = await chrome.storage.local.get(['signingPrivKeyJwk', 'signingPubKeyHex']);
+  if (stored.signingPrivKeyJwk && stored.signingPubKeyHex) {
+    signingPrivKey = await crypto.subtle.importKey('jwk', stored.signingPrivKeyJwk, { name: 'Ed25519' }, false, ['sign']);
+    signingPubKeyHex = stored.signingPubKeyHex;
+  } else {
+    const kp = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
+    const privJwk = await crypto.subtle.exportKey('jwk', kp.privateKey);
+    const pubRaw = new Uint8Array(await crypto.subtle.exportKey('raw', kp.publicKey));
+    signingPubKeyHex = bytesToHex(pubRaw);
+    await chrome.storage.local.set({ signingPrivKeyJwk: privJwk, signingPubKeyHex });
+    signingPrivKey = kp.privateKey;
+  }
+}
 
 // --- session management (mirrors popup.js) ---
 
@@ -36,9 +56,10 @@ async function getOrCreateSession(peerId, channel) {
     peerId,
     channel,
     providedOwnKey,
+    mySigningPubKeyHex: signingPubKeyHex,
     send: (payload) => socket.emit('handshake', payload),
     onLog: (msg) => console.log(`[nocc handshake ${peerId.slice(0, 8)}/${channel}]`, msg),
-    onComplete: async ({ ownKey, peerKey }) => {
+    onComplete: async ({ ownKey, peerKey, peerSigningPubKey }) => {
       console.log('[nocc] handshake complete with', peerId.slice(0, 8), 'in channel', channel);
       const createdAt = Date.now();
       // Skip re-saving our own key when we used the pre-existing one — it's
@@ -47,6 +68,7 @@ async function getOrCreateSession(peerId, channel) {
         await saveKey({ channel, uidHash: myUidHash, token: ownKey, createdAt });
       }
       await saveKey({ channel, uidHash: peerId, token: peerKey, createdAt });
+      if (peerSigningPubKey) await saveSigningKey(peerId, peerSigningPubKey);
 
       // Tell every open Discord tab to re-scan — messages that arrived before
       // the handshake (e.g. from an offline peer) can now be decrypted.
@@ -85,6 +107,7 @@ function connect(onRegistered) {
       const { id } = await getMyId();
       myUidHash = id;
       await chrome.storage.local.set({ myUidHash });
+      await ensureSigningKeyPair();
 
       socket.emit('register', { uid_hash: myUidHash });
       console.log('[nocc] registered as', myUidHash);
@@ -168,6 +191,24 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       ).join('');
       await saveKey({ channel: msg.channel, uidHash: msg.uidHash, token, createdAt: Date.now() });
       sendResponse({ token });
+    })();
+    return true;
+  }
+
+  if (msg.type === 'nocc-sign') {
+    (async () => {
+      await ensureSigningKeyPair();
+      const data = new TextEncoder().encode(msg.data);
+      const sig = await crypto.subtle.sign({ name: 'Ed25519' }, signingPrivKey, data);
+      sendResponse({ sig: bytesToHex(new Uint8Array(sig)) });
+    })();
+    return true;
+  }
+
+  if (msg.type === 'nocc-get-signing-pubkey') {
+    (async () => {
+      const pubKeyHex = await getSigningKey(msg.uidHash);
+      sendResponse({ pubKeyHex });
     })();
     return true;
   }
