@@ -1,8 +1,23 @@
 const { isValidHash, registerUser, userExists } = require('../services/users');
 
+// Returns false (and bumps the counter) when the socket has exceeded `max`
+// calls within a rolling `windowMs` millisecond window.
+function checkRateLimit(socket, key, max, windowMs) {
+  const countKey = `${key}Count`;
+  const windowKey = `${key}Window`;
+  const now = Date.now();
+  if (!socket.data[countKey] || now - socket.data[windowKey] > windowMs) {
+    socket.data[countKey] = 0;
+    socket.data[windowKey] = now;
+  }
+  return ++socket.data[countKey] <= max;
+}
+
 function attachSocketHandlers(io) {
   io.on('connection', (socket) => {
     socket.on('register', async ({ uid_hash } = {}) => {
+      if (socket.data.uidHash) return;
+      if (!checkRateLimit(socket, 'register', 5, 60_000)) return;
       if (!isValidHash(uid_hash)) return;
 
       try {
@@ -18,15 +33,14 @@ function attachSocketHandlers(io) {
     socket.on('handshake', (payload = {}) => {
       const sentFrom = socket.data.uidHash;
       if (!sentFrom) return;
+      if (!checkRateLimit(socket, 'handshake', 100, 60_000)) return;
       if (!isValidHash(payload.to)) return;
 
       io.to(payload.to).emit('handshake', { ...payload, sent_from: sentFrom });
     });
 
-    // Hands SALT/PEPPER to any connecting client, no registration required
-    // (a client needs these to compute its own uid_hash before it can even
-    // register). Deliberate deviation from treating SALT/PEPPER as strictly
-    // out-of-band secrets, per the operator's own choice for this relay.
+    // Hands SALT to any connecting client — needed to compute uid_hash before
+    // registering. PEPPER is intentionally omitted (server-side secret only).
     socket.on('config', (_payload, callback) => {
       if (typeof callback !== 'function') return;
       callback({ salt: process.env.SALT });
@@ -36,13 +50,7 @@ function attachSocketHandlers(io) {
       if (typeof callback !== 'function') return;
 
       if (!socket.data.uidHash) return callback({ error: 'not registered' });
-
-      const now = Date.now();
-      if (!socket.data.verifyCount || now - socket.data.verifyWindow > 60_000) {
-        socket.data.verifyCount = 0;
-        socket.data.verifyWindow = now;
-      }
-      if (++socket.data.verifyCount > 20) return callback({ error: 'rate limited' });
+      if (!checkRateLimit(socket, 'verify', 20, 60_000)) return callback({ error: 'rate limited' });
 
       if (!isValidHash(uid_hash)) {
         return callback({ error: 'uid_hash must be a 64-character hex string' });
