@@ -98,10 +98,7 @@ function connect(onRegistered) {
 
       try {
         const config = await socket.emitWithAck('config', {});
-        await chrome.storage.local.set({
-          salt: config.salt || '',
-          pepper: config.pepper || '',
-        });
+        await chrome.storage.local.set({ salt: config.salt || '' });
       } catch (_) {}
 
       const { id } = await getMyId();

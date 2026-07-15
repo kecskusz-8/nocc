@@ -4,7 +4,7 @@
 
 import { sha256, bytesToHex } from './random.js';
 
-export async function computeUidHash(discordId, salt = '', pepper = '') {
-  const bytes = new TextEncoder().encode(`${discordId}${salt}${pepper}`);
+export async function computeUidHash(discordId, salt = '') {
+  const bytes = new TextEncoder().encode(`${discordId}${salt}`);
   return bytesToHex(await sha256(bytes));
 }

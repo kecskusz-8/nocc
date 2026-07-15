@@ -29,7 +29,7 @@ function attachSocketHandlers(io) {
     // out-of-band secrets, per the operator's own choice for this relay.
     socket.on('config', (_payload, callback) => {
       if (typeof callback !== 'function') return;
-      callback({ salt: process.env.SALT, pepper: process.env.PEPPER || null });
+      callback({ salt: process.env.SALT });
     });
 
     socket.on('verify', async ({ uid_hash } = {}, callback) => {
