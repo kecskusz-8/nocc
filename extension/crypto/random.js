@@ -16,13 +16,6 @@ export function hexToBytes(hex) {
   return bytes;
 }
 
-export function xorBytes(a, b) {
-  if (a.length !== b.length) throw new Error('xorBytes: length mismatch');
-  const out = new Uint8Array(a.length);
-  for (let i = 0; i < a.length; i++) out[i] = a[i] ^ b[i];
-  return out;
-}
-
 export async function sha256(bytes) {
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return new Uint8Array(digest);
