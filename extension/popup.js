@@ -16,7 +16,7 @@ async function refreshMyId() {
   myId = id;
   document.getElementById('myId').value = myId;
   document.getElementById('idSource').textContent =
-    source === 'platform' ? '(hashed from your Discord ID)' : '(mock — no Discord ID found yet)';
+    source === 'platform' ? '(hashed from your platform ID)' : '(mock — no platform ID found yet)';
 }
 
 async function refreshStatus() {

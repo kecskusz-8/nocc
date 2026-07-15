@@ -8,16 +8,16 @@ NOCC exists to make one specific kind of surveillance harder: bulk, server-side 
 
 NOCC is designed against:
 
-- **Client-side/server-side scanning mandates (Chat Control):** if a scanner sits on Discord's servers, or is bolted onto the client by legal mandate, and inspects message content, NOCC ensures there's no plaintext content to inspect by the time it gets there. Only AES ciphertext.
-- **Passive network/server observation:** anyone reading Discord's database, logs, or network traffic sees ciphertext, not your conversation.
+- **Client-side/server-side scanning mandates (Chat Control):** if a scanner sits on the platform's servers, or is bolted onto the client by legal mandate, and inspects message content, NOCC ensures there's no plaintext content to inspect by the time it gets there. Only AES ciphertext.
+- **Passive network/server observation:** anyone reading the platform's database, logs, or network traffic sees ciphertext, not your conversation.
 - **Relay operator snooping:** the relay only ever handles encrypted blobs and salted/peppered UID hashes. A relay operator (including a malicious one) cannot recover message content or real user identities from what passes through it.
 - **Relay seizure:** the relay's database holds exactly one table with one column: hashed UIDs. If it's seized, that's all there is to hand over. No message content, no keys, no message history, no timestamps, no record of who talked to whom.
 
 NOCC is **not** designed against, and does not claim to protect against:
 
 - **A compromised endpoint.** If your device (or the other party's) is compromised, NOCC can't help you. The attacker reads plaintext the same way you do.
-- **Metadata.** Who you're talking to, when, how often, and roughly how much you're saying is visible to Discord regardless of NOCC, because the handshake and message relay still ride on Discord's infrastructure and your own relay's connection logs (to whatever extent your relay operator chooses to log connections; the reference relay doesn't, but nothing stops a fork from doing so). NOCC encrypts *content*, not the fact that a conversation is happening.
-- **Discord's own logs and moderation systems.** Discord still sees connection metadata, account activity, and (for encrypted messages) an opaque ciphertext blob sent through its normal message pipeline. NOCC does not hide that you're using Discord, or that you're sending *something* to someone.
+- **Metadata.** Who you're talking to, when, how often, and roughly how much you're saying is visible to the platform regardless of NOCC, because the handshake and message relay still ride on the platform's infrastructure and your own relay's connection logs (to whatever extent your relay operator chooses to log connections; the reference relay doesn't, but nothing stops a fork from doing so). NOCC encrypts *content*, not the fact that a conversation is happening.
+- **The platform's own logs and moderation systems.** The platform still sees connection metadata, account activity, and (for encrypted messages) an opaque ciphertext blob sent through its normal message pipeline. NOCC does not hide that you're using the platform, or that you're sending *something* to someone.
 - **A targeted, resourced attacker with endpoint access** (device seizure, malware, coerced disclosure). NOCC protects against bulk/dragnet scanning, not against a targeted investigation with physical or remote access to a device.
 - **Traffic analysis.** Message timing and size patterns are not obfuscated.
 - **A malicious fork or a relay that logs everything.** NOCC's security model assumes the relay code you're running matches what's in this repo. Nothing stops someone from forking it, adding logging, and calling it NOCC. Verify what you're actually running, especially if you're not self-hosting.
@@ -26,13 +26,13 @@ NOCC is **not** designed against, and does not claim to protect against:
 
 - Message content, once both sides have completed the key exchange.
 - The K1/K2 key material exchanged during the handshake (masked under each user's own one-time pad before it ever touches the relay; the relay only ever sees XOR-masked blobs it has no way to unwrap).
-- Real Discord user IDs (the relay and database only ever see `SHA256(uid + SALT + PEPPER)`, never the raw ID).
+- Real platform user IDs (the relay and database only ever see `SHA256(uid + SALT + PEPPER)`, never the raw ID).
 - Sender identity in a handshake pass. The relay tags every forwarded pass with `sent_from`, taken from which room the sending socket actually registered into, not from any value the client includes in the payload. A connected client can't claim to be relaying on behalf of a hash it never registered as.
 
 ## What is not protected
 
 - Metadata: who's talking to whom, connection timing, approximate message frequency/size.
-- Anything visible to Discord's own client/server before NOCC intercepts it, or after it's decrypted back into the DOM.
+- Anything visible to the platform's own client/server before NOCC intercepts it, or after it's decrypted back into the DOM.
 - Users who haven't installed NOCC. Messages to/from them are unencrypted, same as always.
 - Anything on a compromised device.
 
@@ -53,5 +53,5 @@ We'll acknowledge reports as promptly as a volunteer-run project can, and credit
 - **A persistent, if minimal, database.** The relay keeps a durable table of hashed UIDs that use the extension. This is intentionally the smallest thing that could work (no timestamps, no connection history, no social graph), but it is a permanent record, and it's a thing to weigh if your threat model includes the relay's database being seized or subpoenaed.
 ##
 - No protection against a malicious or compromised relay operator observing connection metadata (timing, IP, who's connecting to whom). Only message content, key material, and the identity graph between hashes are protected from the relay.
-- Extension security depends on Discord's DOM structure not being adversarially manipulated by Discord itself; NOCC trusts the page it's injected into to the extent any content script must.
+- Extension security depends on the target platform's DOM structure not being adversarially manipulated by the platform itself; NOCC trusts the page it's injected into to the extent any content script must.
 - Built and tested for small groups (well under 10 concurrent users per relay). It has not been hardened or audited for larger-scale or adversarial-scale deployment.

@@ -22,7 +22,7 @@ If it's a **security vulnerability** (key leakage, MITM opportunity, relay loggi
 1. Fork the repo, branch off `main`.
 2. Keep PRs focused. One fix or one feature per PR, not a grab bag.
 3. Explain *why* in the PR description, not just what changed. "Fixes handshake race when both users connect simultaneously" beats "fix bug."
-4. Test manually before submitting (see below). There's no CI pipeline running an automated suite against Discord's live DOM.
+4. Test manually before submitting (see below). There's no CI pipeline running an automated suite against a live chat platform's DOM.
 5. Open the PR against `main`.
 
 ## Coding standards
@@ -31,18 +31,18 @@ If it's a **security vulnerability** (key leakage, MITM opportunity, relay loggi
 - Keep functions small and readable over clever. This code needs to survive being read by a stranger at 2am trying to figure out if it's safe to trust.
 - No unnecessary dependencies. The relay's dependency list should stay short; the extension's should stay at zero.
 - Match the existing style in the file you're editing over imposing a new one.
-- **Modularity**. seperate discord specific actions, so the project can be easily reused, or be a guideline for other platforms.
+- **Modularity**. Separate platform-specific actions into a hook, so the project can be easily reused, or be a guideline for other platforms.
 
 ## Testing
 
-There's no automated test suite. NOCC's surface area (Discord's live DOM, a WebSocket relay, browser extension APIs) doesn't lend itself well to one, and we'd rather ship simple, readable code than a mocked test harness pretending to cover it. Test manually:
+There's no automated test suite. NOCC's surface area (a live chat platform's DOM, a WebSocket relay, browser extension APIs) doesn't lend itself well to one, and we'd rather ship simple, readable code than a mocked test harness pretending to cover it. Test manually:
 
 1. Load the extension unpacked (see [`extension/README.md`](extension/README.md)).
 2. Run the relay locally (see [`server/README.md`](server/README.md)).
 3. Open two browser profiles (or one normal + one incognito/private window), each with the extension loaded and pointed at your local relay.
-4. Log into Discord as two different accounts, DM between them, and confirm:
+4. Using a platform hook, log into the target chat platform as two different accounts, message between them, and confirm:
    - The handshake completes and the extension reflects that.
-   - Messages sent from one side show as ciphertext in Discord's own UI if you inspect the raw message (proving encryption actually happened before sending).
+   - Messages sent from one side show as ciphertext in the platform's own UI if you inspect the raw message (proving encryption actually happened before sending).
    - Messages decrypt correctly on the receiving side.
 5. If you touched relay code, confirm routing state clears when both sockets disconnect (no leftover room membership), and confirm the only thing that survives a relay restart is the `known_users` table, nothing else.
 

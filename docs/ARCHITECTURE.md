@@ -8,7 +8,7 @@ Technical deep-dive into how NOCC actually works. If you just want to use it, se
 
  ![alt text](./image.png)
 
-The relay only ever routes small encrypted handshake payloads between two hashed IDs, and keeps a minimal Postgres record of which hashed IDs have ever registered. It never touches Discord's infrastructure directly, and it never sees an actual chat message. Discord carries whatever ciphertext the extension hands it, same as any other message.
+The relay only ever routes small encrypted handshake payloads between two hashed IDs, and keeps a minimal Postgres record of which hashed IDs have ever registered. It never touches the chat platform's infrastructure directly, and it never sees an actual chat message. The platform carries whatever ciphertext the extension hands it, same as any other message.
 
 ## The handshake, in detail
 
@@ -42,16 +42,16 @@ This periodic rotation means a key compromised today cannot decrypt messages sen
 
 ## Encryption flow (message → encrypt → send → decrypt)
 
-1. You type a message into Discord's input box, normally.
-2. The extension's content script listens for the send event (intercepting before Discord's own submit handler completes).
-3. If you have an active key for this channel (handshake already completed, key still inside its 3-day active window), the plaintext is encrypted with AES-256-GCM using that key, and the ciphertext (base64/hex-encoded) is substituted as the actual message body Discord sends.
-4. Discord's servers receive, store, and deliver the ciphertext exactly like any other message. They have no idea it's encrypted; it's just a string to them.
-5. On the recipient's side, the extension watches the DOM for new message nodes. It recognizes NOCC ciphertext (a recognizable payload marker/prefix), looks up the sender's key for that channel in IndexedDB (active or archived, whichever covers the message's timestamp), decrypts it, and replaces the rendered text node with the plaintext, in place, client-side, after Discord has already rendered its version.
+1. You type a message into the platform's input box, normally.
+2. The platform hook's content script listens for the send event (intercepting before the platform's own submit handler completes).
+3. If you have an active key for this channel (handshake already completed, key still inside its 3-day active window), the plaintext is encrypted with AES-256-GCM using that key, and the ciphertext (base64/hex-encoded) is substituted as the actual message body the platform sends.
+4. The platform's servers receive, store, and deliver the ciphertext exactly like any other message. They have no idea it's encrypted; it's just a string to them.
+5. On the recipient's side, the hook recognizes NOCC ciphertext (a recognizable payload marker/prefix), looks up the sender's key for that channel in IndexedDB (active or archived, whichever covers the message's timestamp), decrypts it, and substitutes the plaintext client-side, after the platform has already rendered its version.
 6. If no key exists yet for this sender/channel (no handshake completed, or the relevant key already aged out past 33 days), the message is shown as-is: plaintext goes out unencrypted if you have no active key, and old ciphertext that's aged out simply can't be decrypted anymore.
 
 ## UID hashing
 
-Real Discord user IDs never touch the relay or the database. Before registering with the relay or addressing a handshake to someone, the extension computes:
+Real platform user IDs never touch the relay or the database. Before registering with the relay or addressing a handshake to someone, the extension computes:
 
 ```
 uid_hash = SHA256(uid + SALT + PEPPER)
@@ -87,20 +87,20 @@ The `known_users` table is the only thing that survives a restart. It has exactl
 
 ## Extension internals
 
-- **DOM injection:** a content script (`content.js` or similar) is injected into `discord.com` pages via the manifest's `content_scripts` entry, running after Discord's own JS has mounted the page.
-- **Event listening:** the script attaches listeners to Discord's message input (intercepting the send action) and uses a `MutationObserver` on the message list container to catch newly rendered messages as they appear, so it can decrypt them in place without needing to poll.
-- **Key storage:** keys live in IndexedDB, not `chrome.storage.local`, since each channel can accumulate many keys over time (one active plus up to ten archived per user, given the 3-day/33-day cycle) and IndexedDB handles that volume and querying by timestamp far better. Each record is keyed by channel and owning user, and stores the key material plus its creation timestamp. A periodic cleanup pass deletes anything past the 33-day mark.
-- **No Discord API usage:** NOCC does not use Discord's official API or bot infrastructure at all. Everything happens by reading and writing the same DOM and network calls the Discord web client itself produces. This is why it's fragile to Discord frontend changes (see [Design decisions and tradeoffs](#design-decisions-and-tradeoffs)) but also why it requires no API key, no bot approval, and no cooperation from Discord whatsoever.
+No platform hook currently ships in `extension/`. The relay, crypto, and key-storage core documented above is platform-agnostic and unaffected; only the piece that reads/writes a specific chat platform's DOM and network traffic is missing. (The project previously had a platform-specific hook here; it's retired from the working tree and archived at git tag `archive/legacy-hook` for anyone who wants to recover it, but this doc no longer describes it since it isn't the project's current architecture.)
+
+- **Key storage:** keys live in IndexedDB, not `chrome.storage.local`, since each channel can accumulate many keys over time (one active plus up to ten archived per user, given the 3-day/33-day cycle) and IndexedDB handles that volume and querying by timestamp far better. Each record is keyed by channel and owning user, and stores the key material plus its creation timestamp. A periodic cleanup pass deletes anything past the 33-day mark. This part is already implemented (`extension/storage/key-store.js`) and any future hook uses it as-is.
+- **No official API/bot usage, by design:** whatever hook gets built is expected to read/write the same DOM and network calls the platform's own web client itself produces, rather than going through an official bot/OAuth API. This is why any hook is inherently fragile to the target platform's frontend changes, but also why it requires no API key, no bot approval, and no cooperation from the platform whatsoever.
 
 ## Design decisions and tradeoffs
 
-- **DOM scraping instead of an official API/bot:** the tradeoff is fragility (Discord can break NOCC with any frontend change) in exchange for zero dependency on Discord's cooperation, approval, or awareness that NOCC exists. Given the adversarial premise of this project, bypassing surveillance mandates Discord may be legally forced to comply with, depending on Discord's blessing was never on the table.
+- **DOM/network scraping instead of an official API/bot:** the tradeoff is fragility (the platform can break a hook with any frontend change) in exchange for zero dependency on that platform's cooperation, approval, or awareness that NOCC exists. Given the adversarial premise of this project, depending on a surveilled platform's blessing was never on the table.
 - **A minimal database instead of zero database:** early versions of this project aimed for a fully stateless relay. In practice, being able to tell whether a given hashed UID belongs to a NOCC user at all (for example, before attempting a handshake) needs *some* durable record. The compromise is a single table holding nothing but hashed UIDs: enough to answer "is this person using NOCC," nothing that reveals conversations, timing, or content. See [`SECURITY.md`](SECURITY.md) for what that tradeoff means if the database is ever seized.
 - **Per-sender, per-channel keys over one combined shared secret:** each user's messages in a channel are independently encrypted and independently readable. This avoids a single derived secret becoming a single point of compromise for both directions of a conversation, and it's what makes the 3-day/33-day rotation cycle meaningful. One side rotating out an old key doesn't require re-synchronizing a jointly derived value.
 - **A three-pass exchange over pre-shared secrets or PKI:** delivering each key with Shamir's three-pass protocol means neither side needs a pre-existing shared secret, a certificate, or any out-of-band setup beyond knowing the other person's hashed UID. It costs six passes per rotation instead of two, but keeps the "no config required" promise intact even for the cryptographic handshake itself.
 - **Room-based routing over an explicit map:** naming Socket.io rooms after `uid_hash` values removes an entire class of bookkeeping code (and the bugs that come with keeping a hand-rolled map in sync with actual socket lifecycles). Socket.io already guarantees room cleanup on disconnect.
 - **No build tooling:** slows down potential feature velocity in exchange for making the entire codebase auditable by a stranger in one sitting, and trivially forkable without fighting someone else's toolchain choices.
-- **Small-scale by design:** NOCC is built for a friend group or a single Discord server's worth of people, not for scaling to millions. There's no horizontal scaling, no load balancing, no sharding, because that's not the problem this project is trying to solve. See [`DEPLOY.md`](DEPLOY.md#scaling-considerations).
+- **Small-scale by design:** NOCC is built for a friend group or a single server/community's worth of people, not for scaling to millions. There's no horizontal scaling, no load balancing, no sharding, because that's not the problem this project is trying to solve. See [`DEPLOY.md`](DEPLOY.md#scaling-considerations).
 
 - **NOCC IS NOT A SELFBOT**
 NOCC simplifies encrypting messages which users could do anyways.
@@ -108,6 +108,6 @@ Essentially, it could be considered a translator.
 
 ## Future considerations
 
-- **Modularity beyond Discord:** the handshake protocol and relay are already platform-agnostic. They just forward encrypted blobs between hashed IDs. Porting NOCC to another chat platform is mostly a matter of writing a new content script for that platform's DOM, not touching the relay or handshake logic at all.
+- **A platform hook:** the handshake protocol and relay are already platform-agnostic — they just forward encrypted blobs between hashed IDs — but no hook currently exists in the working tree (see [Extension internals](#extension-internals)). Building one is mostly a matter of writing a content script for the target platform's DOM/network traffic, not touching the relay or handshake logic at all.
 - **Shorter rotation windows / true per-message ratcheting:** the current 3-day rotation bounds exposure but is coarse. A Double-Ratchet-style scheme would shrink that window to roughly one key per message, at the cost of real complexity in an otherwise deliberately simple codebase.
 - **Group conversations:** the current handshake is pairwise (2 users). A channel with more than two participants currently means each pair of members independently handshakes and exchanges their per-channel keys with each other. Extending this to a proper group broadcast (one key announcement reaching every current member at once) is a natural fork/contribution target.

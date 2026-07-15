@@ -70,7 +70,7 @@ async function getOrCreateSession(peerId, channel) {
       await saveKey({ channel, uidHash: peerId, token: peerKey, createdAt });
       if (peerSigningPubKey) await saveSigningKey(peerId, peerSigningPubKey);
 
-      // Tell every open Discord tab to re-scan — messages that arrived before
+      // Tell every open platform tab to re-scan — messages that arrived before
       // the handshake (e.g. from an offline peer) can now be decrypted.
       const note = { type: 'nocc-handshake-complete', channel, peerId };
       for (const port of activePorts) {
@@ -142,7 +142,7 @@ async function ensureConnected() {
 
 // --- message handler for content scripts ---
 // All key I/O is routed through here because content scripts run in the page's
-// JS context (discord.com origin) and cannot access the extension's IndexedDB.
+// JS context (the platform's own origin) and cannot access the extension's IndexedDB.
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'nocc-status') {
@@ -257,7 +257,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 });
 
-// Keep the service worker alive while any Discord tab has the extension
+// Keep the service worker alive while any platform tab has the extension
 // connected — prevents the relay socket from being killed mid-handshake.
 // Active ports are also used to notify tabs when a handshake completes so
 // they can re-scan messages that arrived before the key exchange finished.

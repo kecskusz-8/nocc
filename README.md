@@ -1,6 +1,6 @@
 # NOCC: No Chat Control
 
-**End-to-end encryption for Discord.**
+**End-to-end encryption for chat platforms.**
 
 Pure JS browser extension + a dumb WebSocket relay. No keys touch the server.
 
@@ -12,13 +12,13 @@ Pure JS browser extension + a dumb WebSocket relay. No keys touch the server.
 
 The EU is pushing "Chat Control," legislation that would force platforms to scan every private message, photo, and file you send, before encryption, in the name of catching criminals. In practice it means mass surveillance of everyone, forever, with no warrant and no suspicion required. It has been rejected, revised, and resurrected more times than anyone can count.
 
-NOCC doesn't lobby, doesn't petition, and doesn't wait for politicians to do the right thing. It encrypts your Discord messages **before they leave your browser**, so there's nothing readable left for a scanner (client-side, server-side, or government-mandated) to scan. Discord sees ciphertext. Chat Control sees ciphertext. Only the person you're talking to sees your actual words.
+NOCC doesn't lobby, doesn't petition, and doesn't wait for politicians to do the right thing. It encrypts your chat messages **before they leave your browser**, so there's nothing readable left for a scanner (client-side, server-side, or government-mandated) to scan. The platform sees ciphertext. Chat Control sees ciphertext. Only the person you're talking to sees your actual words.
 
 Use it, fork it, break it, improve it, hand it to a friend.
 
 ## Features
 
-- **Real E2EE on top of Discord.** Messages are encrypted client-side with AES before they ever hit Discord's servers.
+- **Real E2EE on top of an existing chat platform.** Messages are encrypted client-side with AES before they ever hit the platform's servers, via a per-platform "hook" (see [Status](#status) — no hook currently ships).
 - **Pure JS, zero build step.** No webpack, no bundler, no `npm run build`. Open the folder, read the code, load it as-is.
 - **Dumb relay, not a server.** The WebSocket relay only ever sees masked key material and hashed user IDs, and never sees a chat message at all. The only thing it stores is a single table of hashed UIDs, so it can tell whether a hash belongs to a NOCC user.
 - **Self-hostable in minutes.** Don't trust the default relay? Run your own. It's one Node process plus a small Postgres database.
@@ -35,9 +35,9 @@ Pass 2  U2 -> [relay] -> U1      U2 sends E2(E1(K1))
 Pass 3  U1 -> [relay] -> U2      U1 sends E2(K1); U2 unwraps it to get K1
 ```
 
-U2's own key, K2, makes the same three-pass trip in the other direction. Once both sides hold K1 and K2, U1's messages are always encrypted with K1 and U2's messages are always encrypted with K2, applied before a message is typed into Discord's input box, and decrypted client-side the moment it lands in the DOM. Discord's servers, logs, and any scanner sitting on top of them only ever see ciphertext.
+U2's own key, K2, makes the same three-pass trip in the other direction. Once both sides hold K1 and K2, U1's messages are always encrypted with K1 and U2's messages are always encrypted with K2, applied before a message is sent through the platform's normal input, and decrypted client-side the moment it arrives. The platform's servers, logs, and any scanner sitting on top of them only ever see ciphertext.
 
-User IDs are never sent in the clear either. The extension hashes them (`SHA256(uid + salt + pepper)`) before anything reaches the relay, so even the relay operator can't map a socket back to a real Discord account without already knowing who they're looking for.
+User IDs are never sent in the clear either. The extension hashes them (`SHA256(uid + salt + pepper)`) before anything reaches the relay, so even the relay operator can't map a socket back to a real account without already knowing who they're looking for.
 
 Full technical breakdown, including the key rotation schedule: [`ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -47,7 +47,7 @@ Full technical breakdown, including the key rotation schedule: [`ARCHITECTURE.md
 
 1. Clone or download this repo.
 2. Load the extension unpacked ([full instructions](extension/README.md)).
-3. Open Discord. You're encrypted with anyone else running NOCC, using the default relay, no setup required.
+3. NOCC currently ships with no active platform hook (see [Status](#status)) — the extension's relay/crypto/key-storage core works, but a hook for your chat platform of choice needs to be built or restored first.
 
 Full walkthrough: [`INSTALL.md`](docs/INSTALL.md).
 
@@ -92,10 +92,12 @@ That's it. NOCC is pure JS. No TypeScript, no bundler, no framework, no build st
 
 This whole doc suite was written before a line of implementation exists. It's the ideology and the architecture laid out up front, on purpose, so the *why* and the shape of the thing are locked in before anyone starts coding.
 
+**Platform hook status:** the original platform-specific hook has been retired from the working tree and is archived at the git tag `archive/legacy-hook` (`git tag -l`, then check out that tag into a scratch dir to recover it). No platform hook currently ships in `extension/`; a generalized hook framework (with a new reference implementation) is planned. The relay, crypto, and key-storage core described below is unaffected and platform-agnostic already.
+
 Two things follow from that:
 
 - **Anything here can change.** Env var names, event names, exact schemas, exact numbers (3 days, 33 days, table columns, socket event shapes), all of it is current best thinking, not a frozen spec. Where the code and these docs disagree in the future, the code wins, and the docs should get updated to match.
-- **The core architecture is the part least likely to move.** Client-side encryption before Discord ever sees plaintext, a relay kept as dumb as it can be, no config required to get started: that's the actual point of the project, and everything else described here is in service of it.
+- **The core architecture is the part least likely to move.** Client-side encryption before the platform ever sees plaintext, a relay kept as dumb as it can be, no config required to get started: that's the actual point of the project, and everything else described here is in service of it.
 
 Treat this as a manifesto with implementation notes attached, not a contract.
 
@@ -115,4 +117,3 @@ Found a vulnerability? Please read [`SECURITY.md`](docs/SECURITY.md) before you 
 
 To everyone who's ever run a relay, filed an issue, or forked this into something better: thank you. NOCC exists because surveillance legislation doesn't get to be the last word on how people are allowed to talk to each other.
 
-Not affiliated with, endorsed by, or associated with Discord Inc.

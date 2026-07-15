@@ -4,7 +4,7 @@
 
 The relay is the dumbest piece of this project that can still do its job.
 
-It does two things: forward encrypted handshake payloads between two hashed user IDs, and keep a minimal record of which hashed UIDs have ever registered. It never sees a plaintext message, never sees a real key, never sees a real Discord user ID, and never sees an actual chat message (those go straight through Discord's own send pipeline, already encrypted, without passing through the relay at all).
+It does two things: forward encrypted handshake payloads between two hashed user IDs, and keep a minimal record of which hashed UIDs have ever registered. It never sees a plaintext message, never sees a real key, never sees a real platform user ID, and never sees an actual chat message (those go straight through the platform's own send pipeline, already encrypted, without passing through the relay at all).
 
 ## What it does
 
@@ -14,7 +14,7 @@ It does two things: forward encrypted handshake payloads between two hashed user
 
 ## What it doesn't do
 
-- No message relaying. Chat messages never touch the relay; they travel through Discord's own infrastructure as ciphertext, decrypted client-side on arrival.
+- No message relaying. Chat messages never touch the relay; they travel through the platform's own infrastructure as ciphertext, decrypted client-side on arrival.
 - No key storage. K1/K2 pass through in transit, masked under each user's own one-time pad, and are never written anywhere server-side.
 - No connection logs, no timestamps, no record of who talked to whom. The database holds exactly one thing: `uid_hash`.
 - No authentication beyond "you know your own hashed UID." This is intentionally minimal. See [`SECURITY.md`](../SECURITY.md) for the threat model this is and isn't designed for.
@@ -73,7 +73,7 @@ Short version: it's one Node process plus a small Postgres database, so deploy i
 ## Security considerations
 
 - **The relay operator can see:** connection timing, IP addresses (unless you put it behind something that hides them), and which hashed UIDs are connecting. That's metadata. This is unavoidable for any relay-based system and is documented in full in [`SECURITY.md`](../SECURITY.md).
-- **The relay operator cannot see:** message content, encryption keys, real Discord user IDs (only their salted/peppered hashes), or who is talking to whom, since the database doesn't record any relationship between two hashes, only their individual existence.
+- **The relay operator cannot see:** message content, encryption keys, real platform user IDs (only their salted/peppered hashes), or who is talking to whom, since the database doesn't record any relationship between two hashes, only their individual existence.
 - **If the database is seized or compromised:** the attacker gets a flat list of hashed UIDs. No keys, no messages, no timestamps, no conversation graph. That list is only useful to someone who already knows a target's real UID plus your `SALT`/`PEPPER` to compute the matching hash and confirm they've used this relay.
 - **If a live connection is intercepted:** handshake payloads are already encrypted before they reach the relay, so interception without the recipient's decryption key yields nothing.
 - Run your own relay if you don't want to trust someone else's. That's the whole point of self-hosting being a first-class option here, not an afterthought.
