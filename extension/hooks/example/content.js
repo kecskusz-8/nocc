@@ -20,7 +20,7 @@ function extractPlatformUserId() {
 
 (function initIdentity() {
   const uid = extractPlatformUserId();
-  if (uid) chrome.storage.local.set({ platformUserId: uid });
+  if (uid) chrome.storage.local.set({ platformUserId: uid, platformHookName: 'example' });
 })();
 
 // --- 2. Keep the service worker alive ----------------------------------

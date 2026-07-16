@@ -75,9 +75,10 @@ This periodic rotation means a key compromised today cannot decrypt messages sen
 Real platform user IDs never touch the relay or the database. Before registering with the relay or addressing a handshake to someone, the extension computes:
 
 ```
-uid_hash = SHA256(uid + SALT + PEPPER)
+uid_hash = SHA256(hookName + NUL + uid + SALT + PEPPER)
 ```
 
+- `hookName` is the hook's folder name (e.g. the value of `platformHookName` stored by the hook's content script). It is prepended with a NUL byte separator so there's no ambiguity between the hook name boundary and the start of the UID. This ensures the same raw platform user ID can never hash to the same relay identity across two different platform hooks — preventing any cross-platform collision.
 - `SALT` is a shared secret configured per-relay-deployment. Everyone using the same relay needs the same `SALT` so their hashes are computed identically and can find each other.
 - `PEPPER` is optional and deliberately kept separate from `SALT` (e.g. not stored in the same config file/secrets store), a second layer that, even if `SALT` leaks, still needs to be known separately to recompute valid hashes.
 - This isn't meant to be unbreakable cryptographic anonymity. Someone who already knows a target's real UID can compute the same hash if they also know `SALT`/`PEPPER`. It's meant to keep the relay operator, and anyone observing relay traffic or the database, from casually reading off who's talking to whom without already having that information.

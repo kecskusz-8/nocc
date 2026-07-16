@@ -7,10 +7,10 @@ import { randomBytes, bytesToHex } from './crypto/random.js';
 import { computeUidHash } from './crypto/uid-hash.js';
 
 export async function getMyId() {
-  const stored = await chrome.storage.local.get(['platformUserId', 'salt', 'mockId']);
+  const stored = await chrome.storage.local.get(['platformUserId', 'platformHookName', 'salt', 'mockId']);
 
   if (stored.platformUserId) {
-    const id = await computeUidHash(stored.platformUserId, stored.salt || '');
+    const id = await computeUidHash(stored.platformUserId, stored.salt || '', '', stored.platformHookName || '');
     return { id, source: 'platform' };
   }
 

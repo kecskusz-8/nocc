@@ -241,9 +241,18 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
   if (msg.type === 'nocc-encrypt') {
     (async () => {
+      await ensureConnected();
       if (!myUidHash) { sendResponse({ error: 'not connected' }); return; }
-      const keys = await getKeysFor(msg.channel, myUidHash);
-      if (!keys[0]) { sendResponse({ error: 'no key' }); return; }
+      let keys = await getKeysFor(msg.channel, myUidHash);
+      if (!keys[0]) {
+        // No key yet — create one now so this message goes out as ciphertext.
+        // When the peer sees the NOCC payload and has no matching key, they
+        // initiate a handshake; once it completes they hold this key and can
+        // decrypt this message retroactively.
+        const token = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
+        await saveKey({ channel: msg.channel, uidHash: myUidHash, token, createdAt: Date.now() });
+        keys = [{ token }];
+      }
       const ct = await aesGcmEncrypt(new TextEncoder().encode(msg.plaintext), hexToBytes(keys[0].token));
       sendResponse({ ciphertext: `NOCC:${myUidHash}:${bytesToHex(ct)}` });
     })();
