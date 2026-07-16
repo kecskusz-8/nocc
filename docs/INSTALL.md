@@ -23,6 +23,8 @@ There's no store listing. You load it directly from the source, which also means
 
 That's it. No account, no signup, no config screen to get through.
 
+Once the extension is loaded, open the popup by clicking the NOCC icon — it will auto-discover any hooks in `extension/hooks/` and show which ones are active. To add a hook for your chat platform, see [`HOOKS.md`](HOOKS.md).
+
 ## 2. Connecting to the relay server
 
 By default, the extension is already pointed at a default community relay, so this step is done for you. Any two people running NOCC with default settings can talk to each other encrypted immediately.

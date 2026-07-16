@@ -18,7 +18,7 @@ Use it, fork it, break it, improve it, hand it to a friend.
 
 ## Features
 
-- **Real E2EE on top of an existing chat platform.** Messages are encrypted client-side with AES before they ever hit the platform's servers, via a per-platform "hook" (see [Status](#status) — no hook currently ships).
+- **Real E2EE on top of any chat platform, via hooks.** Messages are encrypted client-side with AES before they ever hit the platform's servers. Drop a folder into `extension/hooks/` and the extension picks it up automatically — see [`docs/HOOKS.md`](docs/HOOKS.md) for the full API.
 - **Pure JS, zero build step.** No webpack, no bundler, no `npm run build`. Open the folder, read the code, load it as-is.
 - **Dumb relay, not a server.** The WebSocket relay only ever sees masked key material and hashed user IDs, and never sees a chat message at all. The only thing it stores is a single table of hashed UIDs, so it can tell whether a hash belongs to a NOCC user.
 - **Self-hostable in minutes.** Don't trust the default relay? Run your own. It's one Node process plus a small Postgres database.
@@ -48,7 +48,7 @@ Full technical breakdown, including the key rotation schedule: [`ARCHITECTURE.md
 
 1. Clone or download this repo.
 2. Load the extension unpacked ([full instructions](extension/README.md)).
-3. NOCC currently ships with no active platform hook (see [Status](#status)) — the extension's relay/crypto/key-storage core works, but a hook for your chat platform of choice needs to be built or restored first.
+3. Write or drop in a hook for your chat platform — see [`docs/HOOKS.md`](docs/HOOKS.md). Open the popup to confirm it's loaded.
 
 Full walkthrough: [`INSTALL.md`](docs/INSTALL.md).
 
@@ -93,14 +93,12 @@ That's it. NOCC is pure JS. No TypeScript, no bundler, no framework, no build st
 
 This whole doc suite was written before a line of implementation exists. It's the ideology and the architecture laid out up front, on purpose, so the *why* and the shape of the thing are locked in before anyone starts coding.
 
-**Platform hook status:** the original platform-specific hook has been retired from the working tree. No platform hook currently ships in `extension/`; a generalized hook framework (with a new reference implementation) is planned. The relay, crypto, and key-storage core described below is unaffected and platform-agnostic already.
+**Hook framework:** the platform-specific hook layer is implemented and ships in `extension/hooks/`. Drop a folder in with a `hook.json` and the extension auto-registers it on next popup open. The relay, crypto, and key-storage core is platform-agnostic and unchanged. Full hook API: [`docs/HOOKS.md`](docs/HOOKS.md).
 
-Two things follow from that:
+Two things follow from this:
 
 - **Anything here can change.** Env var names, event names, exact schemas, exact numbers (3 days, 33 days, table columns, socket event shapes), all of it is current best thinking, not a frozen spec. Where the code and these docs disagree in the future, the code wins, and the docs should get updated to match.
 - **The core architecture is the part least likely to move.** Client-side encryption before the platform ever sees plaintext, a relay kept as dumb as it can be, no config required to get started: that's the actual point of the project, and everything else described here is in service of it.
-
-Treat this as a manifesto with implementation notes attached, not a contract.
 
 ## License
 

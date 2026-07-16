@@ -125,11 +125,16 @@ Calls that exceed the per-socket limits are silently dropped (or return an error
 
 ## Extension internals
 
-No platform hook currently ships in `extension/`. The relay, crypto, and key-storage core documented above is platform-agnostic and unaffected; only the piece that reads/writes a specific chat platform's DOM and network traffic is missing. (The project previously had a platform-specific hook here; it's retired from the working tree and archived at git tag `archive/legacy-hook` for anyone who wants to recover it, but this doc no longer describes it since it isn't the project's current architecture.)
+The extension is split into a platform-agnostic core and a thin platform-specific hook layer.
 
-- **Key storage:** keys live in IndexedDB, not `chrome.storage.local`, since each channel can accumulate many keys over time (one active plus up to ten archived per user, given the 3-day/33-day cycle) and IndexedDB handles that volume and querying by timestamp far better. Each record is keyed by channel and owning user, and stores the key material plus its creation timestamp. A periodic cleanup pass deletes anything past the 33-day mark. This part is already implemented (`extension/storage/key-store.js`) and any future hook uses it as-is.
+**Core** (`extension/background.js`, `extension/crypto/`, `extension/storage/`) handles all relay communication, key exchange, and cryptographic operations. It exposes a `chrome.runtime.sendMessage` API that hooks call into — hooks never touch key material directly.
+
+**Hooks** live in `extension/hooks/<platform>/`. Each folder contains a `hook.json` declaring URL match patterns and which scripts to inject (and in which browser context — isolated world vs. MAIN world, `document_idle` vs. `document_start`). On startup, `background.js` reads the cached hook folder list from `chrome.storage.local` and calls `chrome.scripting.registerContentScripts()` to activate them. The popup enumerates `extension/hooks/` subfolders on open using `chrome.runtime.getPackageDirectoryEntry()`, updates the cached list, and triggers re-registration if anything changed. Full hook API: [`HOOKS.md`](HOOKS.md).
+
+- **Key storage:** keys live in IndexedDB, not `chrome.storage.local`, since each channel can accumulate many keys over time (one active plus up to ten archived per user, given the 3-day/33-day cycle) and IndexedDB handles that volume and querying by timestamp far better. Each record is keyed by channel and owning user, and stores the key material plus its creation timestamp. A periodic cleanup pass deletes anything past the 33-day mark. (`extension/storage/key-store.js`)
 - **Signing key storage:** each client has one long-lived Ed25519 key pair. The private key JWK is stored in `chrome.storage.local` (extension-internal, never sent anywhere). The public key (hex) is kept in the same storage object so it can be quickly read at connect time and piggybacked onto handshake passes. Peer signing public keys (learned during handshake) are stored in a separate IndexedDB object store (`signing-keys`, keyed by `uid_hash`).
-- **No official API/bot usage, by design:** whatever hook gets built is expected to read/write the same DOM and network calls the platform's own web client itself produces, rather than going through an official bot/OAuth API. This is why any hook is inherently fragile to the target platform's frontend changes, but also why it requires no API key, no bot approval, and no cooperation from the platform whatsoever.
+- **No official API/bot usage, by design:** hooks are expected to read/write the same DOM and network calls the platform's own web client produces, rather than going through an official bot/OAuth API. This is why hooks are inherently fragile to platform frontend changes, but also why they require no API key, no bot approval, and no cooperation from the platform whatsoever.
+Though, technically hook devs may require, and/or implement using APIs
 
 ## Design decisions and tradeoffs
 
@@ -147,6 +152,5 @@ Essentially, it could be considered a translator.
 
 ## Future considerations
 
-- **A platform hook:** the handshake protocol and relay are already platform-agnostic — they just forward encrypted blobs between hashed IDs — but no hook currently exists in the working tree (see [Extension internals](#extension-internals)). Building one is mostly a matter of writing a content script for the target platform's DOM/network traffic, not touching the relay or handshake logic at all.
 - **Shorter rotation windows / true per-message ratcheting:** the current 3-day rotation bounds exposure but is coarse. A Double-Ratchet-style scheme would shrink that window to roughly one key per message, at the cost of real complexity in an otherwise deliberately simple codebase.
 - **Group conversations:** the current handshake is pairwise (2 users). A channel with more than two participants currently means each pair of members independently handshakes and exchanges their per-channel keys with each other. Extending this to a proper group broadcast (one key announcement reaching every current member at once) is a natural fork/contribution target.

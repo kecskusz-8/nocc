@@ -2,19 +2,18 @@
 
 *This describes the current design, written before the code. Specifics may still change; see [Status](../README.md#status) in the main README.*
 
-The part that actually lives in your browser: a pure JS content script that watches a chat platform's message box, encrypts what you type before it leaves your machine, and decrypts what shows up in the DOM before you ever read it.
+The part that actually lives in your browser: a pure JS browser extension that encrypts what you type before it leaves your machine and decrypts what shows up in the DOM before you ever read it, on top of any chat platform, via a drop-in hook system.
 
 No framework, no build tools, no bundler. Open any file in this folder and you're looking at exactly what runs in your browser. Nothing compiled, nothing minified, nothing hidden.
 
-**No platform hook currently ships here.** The description below documents how a hook works once one is built/restored for a given platform (see [`ARCHITECTURE.md`](../docs/ARCHITECTURE.md)); the relay/crypto/key-storage core it describes is already implemented and platform-agnostic.
+Hooks live in `extension/hooks/<platform>/`. The popup auto-discovers them on open and shows which are active. See [`docs/HOOKS.md`](../docs/HOOKS.md) to write a hook for your platform.
 
 ## What it does
 
-- Injects into the target chat platform as a content script.
-- Listens for the message-send event on the platform's input box and encrypts the plaintext (AES) using your own active key for that channel, before the platform's own send logic ever sees it.
-- Watches the DOM for incoming messages, detects NOCC-encrypted payloads, and swaps the ciphertext for decrypted plaintext in place.
-- Runs a three-pass key exchange with other NOCC users automatically over the relay, once per channel per key rotation. See [`ARCHITECTURE.md`](../ARCHITECTURE.md) for the full protocol.
-- Stores keys locally via IndexedDB, keyed by channel and owning user, with a timestamp used to age keys out on schedule (3 days active, 33 days total before deletion). Keys never leave your machine except masked under a one-time pad, during the handshake.
+- A **platform hook** injects into the target chat platform as a content script, intercepts message-send events, and encrypts the plaintext (AES-256-GCM) using your own active key for that channel before the platform's own send logic ever sees it.
+- The hook also watches the DOM for incoming messages, detects NOCC-encrypted payloads (`NOCC:<sender>:<hex>`), and swaps the ciphertext for decrypted plaintext in place.
+- The **background service worker** runs a three-pass ECDH key exchange with other NOCC users automatically over the relay, once per channel per key rotation. All cryptographic operations are handled here — hooks never touch raw key material. See [`ARCHITECTURE.md`](../docs/ARCHITECTURE.md) for the full protocol.
+- Keys are stored locally via IndexedDB, keyed by channel and owning user, with a timestamp used to age them out (3 days active, 33 days total before deletion). Keys never leave your machine except wrapped under a one-time ECDH-derived key, during the handshake.
 
 ## Installation (loading unpacked)
 
@@ -49,7 +48,7 @@ There's nothing to configure to get started. The extension ships pointed at a de
 ## Troubleshooting
 
 **Messages showing as ciphertext / garbage text instead of decrypting:**
-The platform shipped a DOM/markup change that broke the selector the hook uses to find message content. This happens periodically since NOCC has no official integration with the platform and relies on reading its DOM. Check open issues, or open one with a screenshot of the DOM structure around a message (`Inspect Element` on a message bubble).
+The platform shipped a DOM/markup change that broke the selector the hook uses to find message content. This happens periodically since NOCC has no official integration with any platform and relies on reading its DOM. Check open issues, or open one with a screenshot of the DOM structure around a message (`Inspect Element` on a message bubble).
 
 **Handshake stuck on "pending":**
 The other user hasn't come online, isn't on the same relay, or your `SALT`/`PEPPER` values don't match theirs (if self-hosting). Hashes are salt/pepper-dependent, so mismatched values mean your hashed UIDs never line up, and neither side can find the other.
@@ -58,7 +57,7 @@ The other user hasn't come online, isn't on the same relay, or your `SALT`/`PEPP
 Confirm both the extension and the relay are reachable. Open the browser console on the platform's tab and check for `NOCC:` prefixed log lines indicating connection errors.
 
 **Extension stops working after a platform update:**
-Chat platforms' frontends change without warning and without a stable API for extensions like this. NOCC works by reading and writing the platform's DOM directly, so any structural change on their end can break it until the selectors are updated. This is an accepted tradeoff of not depending on the platform's cooperation. See [`ARCHITECTURE.md`](../docs/ARCHITECTURE.md#design-decisions-and-tradeoffs).
+Chat platforms' frontends change without warning and without a stable API for extensions like this. NOCC hooks work by reading and writing the platform's DOM directly, so any structural change on their end can break the hook until its selectors are updated. This is an accepted tradeoff of not depending on the platform's cooperation. See [`ARCHITECTURE.md`](../docs/ARCHITECTURE.md#design-decisions-and-tradeoffs).
 
 ## Manual build
 

@@ -31,7 +31,7 @@ If it's a **security vulnerability** (key leakage, MITM opportunity, relay loggi
 - Keep functions small and readable over clever. This code needs to survive being read by a stranger at 2am trying to figure out if it's safe to trust.
 - No unnecessary dependencies. The relay's dependency list should stay short; the extension's should stay at zero.
 - Match the existing style in the file you're editing over imposing a new one.
-- **Modularity**. Separate platform-specific actions into a hook, so the project can be easily reused, or be a guideline for other platforms.
+- **Modularity**. Separate platform-specific actions into a hook, so the project can be easily reused, or be a guideline for other platforms. See [`HOOKS.md`](HOOKS.md) for the full hook API and folder conventions.
 
 ## Testing
 
@@ -40,7 +40,7 @@ There's no automated test suite. NOCC's surface area (a live chat platform's DOM
 1. Load the extension unpacked (see [`extension/README.md`](extension/README.md)).
 2. Run the relay locally (see [`server/README.md`](server/README.md)).
 3. Open two browser profiles (or one normal + one incognito/private window), each with the extension loaded and pointed at your local relay.
-4. Using a platform hook, log into the target chat platform as two different accounts, message between them, and confirm:
+4. Load a hook for the platform you're testing against (see [`HOOKS.md`](HOOKS.md)), log in as two different accounts, message between them, and confirm:
    - The handshake completes and the extension reflects that.
    - Messages sent from one side show as ciphertext in the platform's own UI if you inspect the raw message (proving encryption actually happened before sending).
    - Messages decrypt correctly on the receiving side.
