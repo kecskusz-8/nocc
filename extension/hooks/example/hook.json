@@ -1,0 +1,6 @@
+{
+  "name": "Example",
+  "matches": ["https://example.com/*"],
+  "content_scripts": ["content.js"],
+  "host_permissions": ["https://example.com/*"]
+}
