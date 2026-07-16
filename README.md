@@ -27,15 +27,16 @@ Use it, fork it, break it, improve it, hand it to a friend.
 
 ## How it works
 
-NOCC's relay never sees a key in the clear and never sees a chat message at all. It just shuffles masked blobs between two hashed IDs. Getting one key (say, U1's) from U1 to U2 uses a three-pass exchange (Shamir's protocol), so neither side needs a pre-shared secret:
+NOCC's relay never sees a key in the clear and never sees a chat message at all. It just shuffles encrypted blobs between two hashed IDs. Both per-channel message keys are exchanged in a single three-pass ephemeral ECDH P-256 handshake — no pre-shared secret needed:
 
 ```
-Pass 1  U1 -> [relay] -> U2      U1 sends E1(K1)
-Pass 2  U2 -> [relay] -> U1      U2 sends E2(E1(K1))
-Pass 3  U1 -> [relay] -> U2      U1 sends E2(K1); U2 unwraps it to get K1
+Pass 1  U1 -> [relay] -> U2      U1's ephemeral P-256 pubkey + Ed25519 signing pubkey
+Pass 2  U2 -> [relay] -> U1      U2's ephemeral P-256 pubkey + Ed25519 signing pubkey
+                                 + AES-256-GCM(wrapKey, K2)
+Pass 3  U1 -> [relay] -> U2      AES-256-GCM(wrapKey, K1)
 ```
 
-U2's own key, K2, makes the same three-pass trip in the other direction. Once both sides hold K1 and K2, U1's messages are always encrypted with K1 and U2's messages are always encrypted with K2, applied before a message is sent through the platform's normal input, and decrypted client-side the moment it arrives. The platform's servers, logs, and any scanner sitting on top of them only ever see ciphertext.
+`wrapKey` is derived fresh each handshake via HKDF-SHA-256 over the ECDH shared secret. Once both sides hold K1 and K2, U1's messages are always encrypted with K1 and U2's messages are always encrypted with K2, applied before a message is sent through the platform's normal input, and decrypted client-side the moment it arrives. The platform's servers, logs, and any scanner sitting on top of them only ever see ciphertext.
 
 User IDs are never sent in the clear either. The extension hashes them (`SHA256(uid + salt + pepper)`) before anything reaches the relay, so even the relay operator can't map a socket back to a real account without already knowing who they're looking for.
 
@@ -92,7 +93,7 @@ That's it. NOCC is pure JS. No TypeScript, no bundler, no framework, no build st
 
 This whole doc suite was written before a line of implementation exists. It's the ideology and the architecture laid out up front, on purpose, so the *why* and the shape of the thing are locked in before anyone starts coding.
 
-**Platform hook status:** the original platform-specific hook has been retired from the working tree and is archived at the git tag `archive/legacy-hook` (`git tag -l`, then check out that tag into a scratch dir to recover it). No platform hook currently ships in `extension/`; a generalized hook framework (with a new reference implementation) is planned. The relay, crypto, and key-storage core described below is unaffected and platform-agnostic already.
+**Platform hook status:** the original platform-specific hook has been retired from the working tree. No platform hook currently ships in `extension/`; a generalized hook framework (with a new reference implementation) is planned. The relay, crypto, and key-storage core described below is unaffected and platform-agnostic already.
 
 Two things follow from that:
 
