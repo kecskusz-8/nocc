@@ -6,7 +6,7 @@ import { connectToRelay } from './lib/relay-socket.js';
 import { createHandshakeSession } from './crypto/three-pass.js';
 import { saveKey, getKeysFor, getAllKeys, saveSigningKey, getSigningKey } from './storage/key-store.js';
 import { getMyId } from './identity.js';
-import { bytesToHex, hexToBytes } from './crypto/random.js';
+import { bytesToHex, hexToBytes, aesGcmEncrypt, aesGcmDecrypt } from './crypto/random.js';
 
 let socket = null;
 let myUidHash = null;
@@ -239,6 +239,47 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === 'nocc-encrypt') {
+    (async () => {
+      if (!myUidHash) { sendResponse({ error: 'not connected' }); return; }
+      const keys = await getKeysFor(msg.channel, myUidHash);
+      if (!keys[0]) { sendResponse({ error: 'no key' }); return; }
+      const ct = await aesGcmEncrypt(new TextEncoder().encode(msg.plaintext), hexToBytes(keys[0].token));
+      sendResponse({ ciphertext: `NOCC:${myUidHash}:${bytesToHex(ct)}` });
+    })();
+    return true;
+  }
+
+  if (msg.type === 'nocc-decrypt') {
+    (async () => {
+      // Format: NOCC:<senderUidHash>:<cipherHex>
+      const body = msg.ciphertext.slice('NOCC:'.length);
+      const sep = body.indexOf(':');
+      if (sep !== 64) { sendResponse({ plaintext: null, peerId: null }); return; }
+      const peerId = body.slice(0, 64);
+      const ctBytes = hexToBytes(body.slice(65));
+      const keys = await getKeysFor(msg.channel, peerId);
+      for (const k of keys) {
+        try {
+          const pt = await aesGcmDecrypt(ctBytes, hexToBytes(k.token));
+          sendResponse({ plaintext: new TextDecoder().decode(pt), peerId });
+          return;
+        } catch (_) {}
+      }
+      sendResponse({ plaintext: null, peerId });
+    })();
+    return true;
+  }
+
+  if (msg.type === 'nocc-register-hooks') {
+    (async () => {
+      await chrome.storage.local.set({ hookFolders: msg.hookFolders });
+      await registerHooks(msg.hookFolders);
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
+
   if (msg.type === 'nocc-start-handshake') {
     (async () => {
       await ensureConnected();
@@ -273,5 +314,52 @@ chrome.runtime.onConnect.addListener((port) => {
   });
 });
 
-// Auto-connect on startup.
+// Registers content scripts for the given hook folder names.
+// Called at startup (with the cached folder list from storage) and on demand
+// from the popup (after it enumerates the hooks/ directory and detects changes).
+async function registerHooks(hookFolders) {
+  try {
+    const existing = await chrome.scripting.getRegisteredContentScripts();
+    const ids = existing.filter((s) => s.id.startsWith('nocc-hook-')).map((s) => s.id);
+    if (ids.length) await chrome.scripting.unregisterContentScripts({ ids });
+
+    const registrations = [];
+    const loadedHooks = [];
+
+    for (const name of hookFolders) {
+      const hook = await fetch(chrome.runtime.getURL(`hooks/${name}/hook.json`)).then((r) => r.json());
+      loadedHooks.push({ name: hook.name, folder: name });
+
+      if (hook.registrations) {
+        hook.registrations.forEach((reg, i) => {
+          const entry = {
+            id: `nocc-hook-${name}-${i}`,
+            matches: reg.matches,
+            js: reg.js.map((f) => `hooks/${name}/${f}`),
+            runAt: reg.runAt ?? 'document_idle',
+          };
+          if (reg.world) entry.world = reg.world;
+          registrations.push(entry);
+        });
+      } else {
+        registrations.push({
+          id: `nocc-hook-${name}-0`,
+          matches: hook.matches,
+          js: hook.content_scripts.map((f) => `hooks/${name}/${f}`),
+          runAt: 'document_idle',
+        });
+      }
+    }
+
+    if (registrations.length) await chrome.scripting.registerContentScripts(registrations);
+    await chrome.storage.local.set({ loadedHooks });
+  } catch (err) {
+    console.warn('[nocc] registerHooks failed:', err);
+  }
+}
+
+// Auto-connect on startup and restore previously discovered hooks from storage.
 connect();
+chrome.storage.local.get('hookFolders').then(({ hookFolders }) => {
+  registerHooks(hookFolders ?? []);
+});

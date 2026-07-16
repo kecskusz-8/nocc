@@ -10,9 +10,10 @@
     "service_worker": "background.js",
     "type": "module"
   },
-  "permissions": ["storage"],
+  "permissions": ["storage", "scripting"],
   "host_permissions": [
-    "http://localhost:3000/*"
+    "http://localhost:3000/*",
+    "<all_urls>"
   ],
   "content_scripts": []
 }

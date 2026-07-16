@@ -121,6 +121,29 @@
       word-break: break-all;
     }
 
+    #hookList {
+      margin-top: 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .hook-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font: 11px monospace;
+      color: var(--text);
+    }
+
+    .hook-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+      flex-shrink: 0;
+    }
+
     #showStoredKeys { margin-top: 12px; }
   </style>
 </head>
@@ -139,6 +162,9 @@
     <div class="status-dot" id="statusDot"></div>
     <span class="status-text" id="statusText">Disconnected</span>
   </div>
+
+  <label>Loaded Hooks</label>
+  <div id="hookList"><span style="font:11px monospace;color:var(--muted)">scanning…</span></div>
 
   <button id="showStoredKeys">Show Stored Keys</button>
 

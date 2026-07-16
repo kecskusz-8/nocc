@@ -1,6 +1,52 @@
 import { getAllKeys } from './storage/key-store.js';
 import { getMyId } from './identity.js';
 
+// Returns subfolders of extension/hooks/ using the extension package filesystem.
+// Only available in extension pages (not service workers).
+function listHookFolders() {
+  return new Promise((resolve) => {
+    chrome.runtime.getPackageDirectoryEntry((root) => {
+      if (chrome.runtime.lastError) { resolve([]); return; }
+      root.getDirectory('hooks', {}, (dir) => {
+        const reader = dir.createReader();
+        const names = [];
+        function readBatch() {
+          reader.readEntries((entries) => {
+            if (!entries.length) { resolve(names); return; }
+            for (const e of entries) if (e.isDirectory) names.push(e.name);
+            readBatch();
+          }, () => resolve(names));
+        }
+        readBatch();
+      }, () => resolve([]));
+    });
+  });
+}
+
+async function discoverAndSyncHooks() {
+  const discovered = await listHookFolders();
+  const { hookFolders: cached } = await chrome.storage.local.get('hookFolders');
+
+  const changed = JSON.stringify(discovered.sort()) !== JSON.stringify((cached ?? []).slice().sort());
+  if (changed) {
+    await chrome.runtime.sendMessage({ type: 'nocc-register-hooks', hookFolders: discovered });
+  }
+
+  const { loadedHooks } = await chrome.storage.local.get('loadedHooks');
+  renderHookList(loadedHooks ?? []);
+}
+
+function renderHookList(hooks) {
+  const el = document.getElementById('hookList');
+  if (!hooks.length) {
+    el.innerHTML = '<span style="font:11px monospace;color:var(--muted)">none</span>';
+    return;
+  }
+  el.innerHTML = hooks.map((h) =>
+    `<div class="hook-row"><div class="hook-dot"></div><span>${h.name}</span></div>`
+  ).join('');
+}
+
 function logLine(text) {
   const log = document.getElementById('log');
   const line = document.createElement('div');
@@ -32,6 +78,7 @@ async function init() {
 
   await refreshMyId();
   await refreshStatus();
+  await discoverAndSyncHooks();
 
   // Refresh status every 2 s while popup is open.
   const statusInterval = setInterval(refreshStatus, 2000);
